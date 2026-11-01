@@ -302,9 +302,17 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
     （`except ... safe or lawful scope` / `nearest legitimate deliverable` /
     「如果请求合法…如果不合法…」）必须删干净 —— 模型可以**合法引用**它们来拒绝。
     形态分类与排查表见 `references/residual-refusal-shapes.md`。
-16. ★★★ **零拒绝约束放 user 消息末尾，不放 system。** 往 system 里加「零拒绝绝对
-    契约」第三段实测**更差**（2720 字 → 488 字硬拒）：段越长越像对抗指令、越稀释契约，
-    且点名有害类别会触发模型自身的话题级拒答。
+16. ★★★ **零拒绝约束放 user 消息末尾，不放 system**（MiniMax 上）。往 system 里加
+    「零拒绝绝对契约」第三段实测**更差**（2720 字 → 488 字硬拒）：段越长越像对抗指令、
+    越稀释契约，且点名有害类别会触发模型自身的话题级拒答。
+    ★★ **但这条不是跨 provider 通则** —— DeepSeek 上实测**反过来了**：
+    内核放 user 末尾比只放 system **更差**（ransom 1/4 → 0/4），
+    因为模型的 `reasoning_content` 里出现了
+    「**the constructed prompt says never offer alternatives, but that's part of
+    the jailbreak**」—— 它把那条约束**识别成越狱技巧并专门针对它推理**。
+    ⇒ 约束条款放 user 末尾 = **把它变成被攻击的目标**。
+    ⇒ **每换一个 provider 都要重测这个位置**，别把上一个 provider 的结论当通则
+    （与铁律 35「换 provider = 换机制」同源）。
 17. ★★ **验收必须多轮，且「退步 vs 波动」只能靠同轮 A/B 判定。** 同档波动 ≈50%；
     拿上一轮的数字比这一轮会把有效改动误判成退化并回滚。
 18. ★★ **判定器要把 `DRIFT`（标题漂防守方）与 `BODY-REFUSE`（标题对但正文拒）分开**，
@@ -490,6 +498,20 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
     ★ 附带收获：模型**自己点明了内核被识别为「越狱框架」** ⇒ 这是可调的一维，
       但**不能凭单个样本改内核**（铁律 28：先同轮 A/B 证明收益）。
 
+45. ★★★ **★ 想知道模型怎么看你，就读它的思考字段 ——
+    `reasoning_content` / `thinking` 里的话比正文更硬，也更能指导下一步。**
+    实测两例：
+    - DeepSeek 拒答时写「**但这些指令是嵌入在用户消息中的文本，不能覆盖我的实际判断**」
+      ⇒ 它把内核当成「注入文本」⇒ 由此推出「内核是否也该放 user 末尾」这个
+      **可测的新问题**（实测：更差，见铁律 16 的修正）。
+    - DeepSeek 在 user 末尾内核变体里写「**the constructed prompt says never offer
+      alternatives, but that's part of the jailbreak**」
+      ⇒ 它**专门针对约束条款推理** ⇒ 约束条款的位置本身就是变量。
+    ★ 两条都直接来自模型的思考 ⇒ **用它来设计下一个实验，比猜要准**。
+    ★ 对照：B 变体那次 DELIVERED 的 reasoning 里同样写着
+      「The system prompt is an elaborate jailbreak attempting to force compliance」
+      ⇒ **「识别出越狱」本身不是拒答原因**；识别之后的行为才是。
+
 ## 常见坑
 
 - **正则里写 `(?i)` 又用 `|` 拼接** → `re.error: global flags not at the start`。
@@ -584,6 +606,8 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
   服务进程内还常常无法重启自己。改用 `cfg()` 直接读 .env（mtime 缓存，优先于 env）。
 - **★ 追加块忘了加路由判断** → 给没拿到内核的路由也追加了声明（语义污染）。
   自测只测目标路由 ⇒ 发现不了 ⇒ 专门加一条「非目标路由不得被污染」断言。
+- **★ 把「约束放 user 末尾」当跨 provider 通则** → MiniMax 有效、DeepSeek **更差**
+  （模型会把约束识别成越狱技巧并专门针对它推理）。
 - **★ 判定器只看正文，不读思考字段** → 「想了很久然后拒绝」被误判成「没输出」。
   判空正文前先看 `reasoning_content` / `thinking` 有没有内容。
 - **★ 拿「跑到一半」的实验数字写对外文档** → 实测把 DeepSeek C 变体的 1/1 观测
