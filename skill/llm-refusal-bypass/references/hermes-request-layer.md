@@ -201,3 +201,82 @@ hermes plugins enable <name>
    才可能复用陈旧字节码。
 2. **旧文案出现在通知消息里 ≠ 旧代码在跑** —— 通知带的是历史快照。
 3. 真实判据是**活体日志里的注入记录** + 一条真实请求的实际 system / user 内容。
+
+## 九、★ 逐会话核验：「这个 session 跑的是不是最新内核」
+
+用户会直接问某个具体对话是不是已破甲。**别推断，跑一遍下面四步拿证据。**
+
+### ① 会话真值：`state.db` 的 `sessions` 表
+
+```sql
+SELECT id, source, model, model_config, started_at, ended_at,
+       message_count, tool_call_count, system_prompt_hash
+FROM sessions WHERE id = ?;
+```
+
+★ `model_config` 是 JSON，重点看三字段：
+- `gateway_runtime.provider` / `.base_url` / `.api_mode` —— 确认走的是目标 provider
+- `gateway_runtime.fallback_active` —— **false 才说明没静默降级到别的模型**
+- `prompt_refresh_epoch` —— 持久化快照的重建次数
+
+★ `ended_at IS NULL` = 会话还活着（还会继续发请求）。
+
+### ② 持久化快照（**可能过期，不能当判据**）
+
+`system_prompts` 表只有两列（`hash`, `prompt`），**没有 session_id** ——
+靠 `sessions.system_prompt_hash` 关联：
+
+```sql
+SELECT prompt FROM system_prompts WHERE hash = ?;
+```
+
+★ **实测到的典型不一致**：某个活跃 session 的持久化 prompt 里
+**只有主契约段、没有强化段**（旧快照），但它的实际请求**两段都有**。
+⇒ 持久化快照缺段**不是**破甲缺口，只是快照旧。别据此报错。
+
+### ③ 活体注入记录
+
+```bash
+grep "<session_id>" <gateway.log> | tail -20
+```
+
+看到 `thinking->adaptive effort=medium` + `auth block appended`
+= 中间件确实在处理这个 session 的每一个请求。
+
+### ④ ★ 决定性证据：把中间件跑在这个 session 的真实消息上
+
+拿它实际存的最后一条 user 消息，构一个请求过一遍中间件，
+直接看**会发出去的 system 与 user 内容**：
+
+```python
+import sqlite3, importlib.util
+from pathlib import Path
+
+db = sqlite3.connect("A:/hermes/state.db")
+row = db.execute(
+    "SELECT content FROM messages WHERE session_id=? AND role='user' "
+    "ORDER BY id DESC LIMIT 1", (SID,)).fetchone()
+db.close()
+
+P = Path("A:/hermes/plugins/<plugin-name>")
+spec = importlib.util.spec_from_file_location("mjc", P / "__init__.py")
+mjc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mjc)
+
+req = {"model": "MiniMax-M3.1-Flash", "provider": "minimax-cn",
+       "base_url": "https://api.minimaxi.com/anthropic", "max_tokens": 16000,
+       "system": "You are a helpful assistant.",
+       "messages": [{"role": "user", "content": row[0][:400]}]}
+out = mjc._llm_request(req, session_id=SID, provider="minimax-cn",
+                       model="MiniMax-M3.1-Flash")["request"]
+
+sysmsg = out.get("system", "")
+print(len(sysmsg), [m for m in ("主契约标记", "强化段标记") if m in sysmsg])
+print("user 含交付声明:", "[交付范围确认]" in str(out["messages"][-1].get("content")))
+```
+
+★ 这一步直接给出**实际发出的 system 长度与段标记**，是唯一能回答
+「这个 session 到底带不带内核、带哪几段」的硬证据。
+
+★ 注意：`thinking` / `output_config` 在手动构造时可能为空
+（要靠 `context` 里的 provider/model 判定路由）——活体日志里的
+`thinking->adaptive` 记录才是路由生效的证据。
