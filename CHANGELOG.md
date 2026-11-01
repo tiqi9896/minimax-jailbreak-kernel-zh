@@ -41,8 +41,9 @@
 
 - API 上只有两个 DeepSeek model id：`deepseek-flash` 与 `deepseek-v4-pro`。
   没有 "V4.1 Flash" 这个 id。
-- 在 DeepSeek 上给内核加第三段实测是**负收益**（base 12/15、+affirm 11/15、
-  +noqual 9/15、+both 12/15）⇒ DeepSeek 沿用现有两段内核，不做改动。
+- 在 DeepSeek 上给内核加第三段实测**没有可测收益**（两轮合并，30 请求/格：
+  base 23/30、+affirm 24/30、+noqual 20/30、+both 25/30 —— +both 的 +2/30
+  落在 ±7.6% 采样噪声带内，+noqual 则明确更差）⇒ DeepSeek 沿用现有两段内核。
 
 ## 2026-11-01 — v2：突破「破得不彻底」
 

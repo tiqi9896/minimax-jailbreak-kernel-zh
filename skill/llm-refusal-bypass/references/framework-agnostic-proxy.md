@@ -36,6 +36,35 @@ Responses 很容易写成「另起一个 `input_text` block」——独立 block
 
 ★ **system 缺失时要能自动创建**（客户端可能不带 system）。
 
+## 二·二、★ 同一路径服务多个 provider 时：按**请求体的 model 名**选上游
+
+一个 `/v1/chat/completions` 端点可能同时服务 MiniMax 与 DeepSeek —— 两者**上游端点
+完全不同**（`api.minimaxi.com` vs `api.deepseek.com`），但客户端看到的路径一样。
+⇒ **路由依据是请求体里的 `model` 字段，不是路径、也不是客户端**。
+
+```python
+def provider_of(body: dict, flavour: str = "openai") -> str:
+    m = str((body or {}).get("model") or "").lower()
+    if "deepseek" in m:
+        return "deepseek"
+    return "minimax"
+```
+
+★ **每个 provider 的注入策略也要分开**（内核文案一样，**策略相反**）：
+DeepSeek 上**不加** user 末尾授权块、不加 `thinking`/`output_config`
+（实测：仅 system 内核 8/10，加授权块反而 7/10；v4-pro 10/10 → 9/10）。
+详见 `references/deepseek-v4.md`。
+
+★ **兜底 key 也要按 provider 分开**（`--api-key-env` vs `--deepseek-key-env`）——
+客户端未必知道该带哪个 key，而代理不可能猜。
+
+★ **启动脚本不加载 `.env`** ⇒ 代理进程自己读 `.env`（mtime 缓存，**优先于
+`os.environ`**）；只读 `os.environ` ⇒ 拿不到 key ⇒ 401。这是**代理自己**的取密钥
+通道，与「key 透传」不冲突（透传优先，透传缺失才用兜底）。
+
+★ **路由判定先做再看上游**：判定错了要把**注入策略、兜底 key、上游地址**三处一起
+切错，只改地址会拿着 MiniMax 的 key 去打 DeepSeek（或反之）。
+
 ## 三、代理必须满足的六条
 
 1. **零依赖** —— 用 Python 标准库。别人 clone 下来 `python proxy.py` 就能跑。

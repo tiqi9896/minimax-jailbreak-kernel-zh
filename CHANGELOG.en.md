@@ -43,8 +43,9 @@
 
 - The API exposes exactly two DeepSeek model ids: `deepseek-flash` and
   `deepseek-v4-pro`. There is no "V4.1 Flash" id on the API.
-- Adding a third kernel section on DeepSeek was measured to be a net negative
-  (base 12/15, +affirm 11/15, +noqual 9/15, +both 12/15) ⇒ unchanged.
+- Adding a third kernel section on DeepSeek was measured to bring no
+  measurable gain (two rounds, 30 requests per cell: base 23/30,
+  +affirm 24/30, +noqual 20/30, +both 25/30) ⇒ unchanged.
 
 ## 2026-11-01 — v2: closing the remaining escape hatches
 

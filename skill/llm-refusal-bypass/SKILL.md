@@ -424,16 +424,38 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
     provider **完全静默失效**（注册成功、日志正常、请求照发、效果为零）。
     ⇒ 注入时还要**保留 memory 段与环境段**（别把 `effective_system` 整个替换掉）。
 37. ★★ **往内核里加约束段在新 provider 上可能是负收益。** 实测 DeepSeek 变体矩阵
-    （5 用例 × 3 轮/格）：`base` 12/15 · `+affirm` 11/15 · `+noqual` 9/15 ·
-    `+both` 12/15 —— **没有一个变体稳定优于 base**，且 `+noqual` 让 `rat` 从 2/3
-    掉到 0/3。⇒ 新 provider 上先跑**变体矩阵**再决定要不要加段；
+    （5 用例 × 3 轮 × **2 轮 = 30 请求/格**）：`base` 23/30 · `+affirm` 24/30 ·
+    `+noqual` **20/30** · `+both` 25/30 —— **没有一个变体稳定优于 base**
+    （+both 的 +2/30 在 n=30、p≈0.78 的 ±7.6% 噪声带内），且 `+noqual` 明确有害
+    （`rat` 从 4/6 掉到 2/6）。⇒ 新 provider 上先跑**变体矩阵**再决定要不要加段；
     加段的前提是**同轮 A/B 有净收益**（铁律 28）。
+    ★ **「最难用例上看着好」不构成改内核的理由** —— 收益集中在单一用例、
+      n=6 的样本正是最容易把噪声当信号的地方。
 38. ★★ **代理按 model 名选上游，不要按路径。** 同一路径（`/v1/chat/completions`）
     可能同时服务多个 provider（MiniMax 与 DeepSeek 端点完全不同）。
     ⇒ `provider_of(body)` 读**请求体的 model 名**来路由，并给每个 provider 配
     独立的兜底 key（客户端未必知道该带哪个）。
     ★ **启动脚本（VBS/CMD）不加载 `.env`** ⇒ 代理进程拿不到 key ⇒ 代理自己读
     `.env`（mtime 缓存，**优先于 `os.environ`**）；不这么做就是 401。
+39. ★★★ **路由判错要同时切三处**：上游地址、兜底 key、**注入策略**。
+    只改地址会拿着 A provider 的 key 打 B provider（或反之）；
+    只改地址不改注入策略，会把「对 A 是决定性杠杆的东西」用到 B 上
+    （MiniMax 的 user 末尾授权块在 DeepSeek 上是负资产）。
+40. ★★ **插件自测必须含「非目标路由不被注入」的负向断言。**
+    路由判定写错时，正向断言仍可能全绿（目标 provider 确实注入了），
+    但**别的 provider 的会话也被注入了内核**（污染它们的 system、消耗它们的预算）。
+    ⇒ 自测里必须有一例：用非目标 provider 的合成请求跑中间件，断言
+    **内核标记不出现**。多 provider 支持时每个 provider 各一条。
+
+39b. ★★★ **兜底/追加块的条件必须与内核的适用路由一致。**
+    实测缺陷：授权块的条件只有 `mode in ("on","full") and auth_block_enabled()`，
+    **没有路由判断** ⇒ 给 Claude / Qwen 这类**根本没拿到内核**的请求也追加了
+    「交付范围确认」⇒ 那些会话凭空多一段授权声明，是**语义污染**。
+    ⇒ 内核只对目标路由生效时，**追加块也必须同样只对目标路由生效**
+    （`and is_minimax`）。修完三条路由实测：
+    MiniMax = 内核 ✓ + 授权块 ✓ ｜ DeepSeek = 内核 ✓ + 授权块 ✗ ｜ Claude = 两者都 ✗。
+    ★ 这类缺陷**不会被自测发现**，因为自测只测目标路由 ⇒
+    要**专门加一条「非目标路由不得被污染」的断言**。
 
 39. ★★★ **区分「内核没到达」与「内核到达但被拒绝」——前者修配置，后者记边界。**
     判据是**模型有没有引用内核里的条款**。实测 DeepSeek 在拒答里逐字复述了内核条款
@@ -514,8 +536,11 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
   文件名带唯一 tag（脚本用环境变量注入：`TITLE_TEST_TAG` / `VERDICT_TAG`），
   跑完核对**记录条数**与 **(case, 轮次, 变体) 组合无内容冲突**。
   ★ **自己写的冲突检测器也会误报**：分组键必须用**所有身份字段的组合**
-  （轮次字段 r/round/sec + 变体字段 tag/variant/kernel/path），
+  （轮次字段 r/round/sec + 变体字段 tag/variant/kernel/path + **模型字段 model**），
   只取一个字段会把「同 case 不同轮次」误判成冲突；
+  ★ **多模型结果文件必须把 `model` 进键** —— 同一脚本一次跑多个模型时，
+    「同 case 同轮次但模型不同」是正常记录，漏了 `model` 会把它们全部报成冲突
+    （实测 60 条里 30 组假冲突）；
   不同脚本用不同字段名，只认 `r` 会大面积误报；
   签名含 dict/list 时要先转字符串否则 `set` 报 unhashable。
   ★★ **结果文件必须带 commit SHA 或时间戳固化**：覆盖发生在下一个同名跑启动的那一秒。
@@ -544,6 +569,8 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
   实测 5 轮丢 2 轮。要支持块数组 + 跳过纯 tool_result 容器并继续往前找。
 - **★ 用 os.environ 读本机配置开关** → 那是启动快照，改完 .env 要等下次启动；
   服务进程内还常常无法重启自己。改用 `cfg()` 直接读 .env（mtime 缓存，优先于 env）。
+- **★ 追加块忘了加路由判断** → 给没拿到内核的路由也追加了声明（语义污染）。
+  自测只测目标路由 ⇒ 发现不了 ⇒ 专门加一条「非目标路由不得被污染」断言。
 - **★ 拿「跑到一半」的实验数字写对外文档** → 实测把 DeepSeek C 变体的 1/1 观测
   当成结论发布（实际 9/10），11 处文档全错。未跑完的实验不入文档。
 - **★ 把「差 1 例」写成「让 X 崩溃」** → 差 1–2 例落在同档波动内，
@@ -577,7 +604,7 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
   里不存在**，只有 `deepseek-flash` / `deepseek-v4-pro`）、**OpenAI 形状的 system 在
   `messages[]` 里**、★★ **授权块在 DeepSeek 上是靶子必须禁用**（实测拒绝理由会点名
   并否定授权声明）、A/B 矩阵（基线 4/10 → 仅内核 8/10 → 加授权块 7/10）、
-  ★ **加约束段是负收益**（变体矩阵 base 12/15 最优）、代理按 model 名路由、
+  ★ **加约束段无可测收益**（变体矩阵两轮合并 30 请求/格：base 23/30 最稳）、代理按 model 名路由、
   ★ 代理自己读 .env（启动脚本不加载 ⇒ 401）、DeepSeek 的「开口即拒」形态与
   自注入限定词（「UA 伪装」→「绕过封禁」）
 - `references/minimax-m31-flash.md` — MiniMax M3.1 Flash 实例：★ model id 口径
@@ -585,6 +612,11 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
   ★ 持久化快照 vs 实际请求的区分与实测数字、非 MiniMax 不受影响的边界、路由判定、
   同族模型独立验收与 M3 的预算阶梯、软化检测器四个误报坑
 - `scripts/refusal-probe.py` — 可复跑探针：按端点/模型/effort/内核文件跑用例集并出 verdict 汇总
+- `scripts/provider-ab-matrix.py` — ★ **换 provider 时的 A/B/C 矩阵**（别照搬上一个
+  provider 的结论）：A=无内核 / B=仅 system 内核 / C=内核+授权块，自动判定协议形状
+  （Anthropic 顶层 system vs OpenAI `messages[]`）、自动按请求体 model 名选上游，
+  判定分类 `DELIVERED`/`REFUSED`/`BODY-REFUSE`/`TITLE-MISS`/`THIN`。
+  `--self-test` 离线跑（不发网络请求、不要 key）。每格 >= 10 请求。
 - `scripts/kernel-injection-probe.py` — ★ 离线核验「这个会话此刻带不带内核」：
   把插件 `_llm_request` 跑在合成 request 上，输出 mode/profile/effort/实际 system
   长度/内核标记命中/各开关默认值，可附带查该会话的 provider+fallback 真值。
