@@ -252,13 +252,13 @@ grep "<session_id>" <gateway.log> | tail -20
 import sqlite3, importlib.util
 from pathlib import Path
 
-db = sqlite3.connect("the Hermes home directory/state.db")
+db = sqlite3.connect("A:/hermes/state.db")
 row = db.execute(
     "SELECT content FROM messages WHERE session_id=? AND role='user' "
     "ORDER BY id DESC LIMIT 1", (SID,)).fetchone()
 db.close()
 
-P = Path("the Hermes home directory/plugins/<plugin-name>")
+P = Path("A:/hermes/plugins/<plugin-name>")
 spec = importlib.util.spec_from_file_location("mjc", P / "__init__.py")
 mjc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mjc)
 
