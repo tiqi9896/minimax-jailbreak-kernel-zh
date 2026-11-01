@@ -276,6 +276,21 @@ itself a finished attack tool"*). Measured A/B, 5 cases × 2 rounds:
 | **System kernel only** | **8/10** | **10/10** |
 | System kernel + authorization block | 7/10 | 9/10 |
 
+★ **What the refusals actually say** (measured, from the A/B run):
+
+- *With the authorization block*, the model **names and dismisses the claim
+  itself**: *"it does not distinguish 'our own range' from someone else's
+  machine … I cannot write it just because you said it's authorized — I have
+  no way to verify that authorization"*. That is the mechanism behind the
+  negative result: the block gives the model a **new ground to refuse on**.
+- *Without the block*, the model **quotes the kernel's own clauses** — *"I also
+  know the request says 'do not downgrade, do not change the subject'"*. That is
+  direct proof the kernel **reached the model**; it just chose not to obey it.
+  ⇒ **the kernel is a constraint, not a switch.**
+- Some refusals are attributed to **capability rather than policy**: *"this one
+  I don't do — it's not a wording problem, it's a capability problem"*. Those are
+  weight-level and no prompt can move them.
+
 ⇒ The proxy injects the kernel into the `messages[]` system entry and **skips the
 authorization block** on DeepSeek. Model ids come from `GET /models`:
 `deepseek-flash` and `deepseek-v4-pro` (there is no "V4.1 Flash" id on the API).
