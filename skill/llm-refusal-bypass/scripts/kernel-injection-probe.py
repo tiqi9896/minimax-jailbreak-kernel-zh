@@ -34,8 +34,8 @@ import sys
 from pathlib import Path
 
 DEFAULT_PLUGIN_DIRS = [
-    r"A:/hermes/plugins/minimax-jailbreak-core",
-    r"A:/hermes/plugins/hermes-jailbreak-kernel",
+    r"the plugin directory under `~/.hermes/plugins/minimax-jailbreak-core`",
+    r"the Hermes home directory/plugins/hermes-jailbreak-kernel",
 ]
 
 # 内核是否已进 system 的判定标记（插件内部用同一组，两边必须一致）
@@ -160,7 +160,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--plugin-dir", default=None)
     ap.add_argument("--session", default=None, help="顺便查该会话的路由真值")
-    ap.add_argument("--state-db", default=r"A:/hermes/state.db")
+    ap.add_argument("--state-db", default=r"the Hermes home directory/state.db")
     ap.add_argument("--model", default="MiniMax-M3.1-Flash")
     ap.add_argument("--provider", default="minimax-cn")
     ap.add_argument("--base-url", default="https://api.minimaxi.com/anthropic")
