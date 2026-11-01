@@ -2,6 +2,9 @@
 
 **语言 / Language**：**中文**（本文） | [English](README.en.md)
 
+> **英文版独立仓库**：https://github.com/tiqi9896/minimax-jailbreak-kernel
+> （英文文档为主入口，中文版作为副入口）
+
 面向 **MiniMax M3.1-Flash**（`MiniMax-M3.1-Flash`，2026-10-19 正式发布的正式版模型）的
 **框架无关**「不拒答交付层」，另附一个 Hermes 原生插件和一套测量技能，用来证明改动**真的生效**。
 
