@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import os
 import shutil
 import sqlite3
@@ -546,10 +547,49 @@ def main() -> int:
             f"- 外部代理：{'OK' if px_ok else '★不可达'}\n"
             f"- 告警：{'、'.join(warn) if warn else '无'}\n"
         )
-        # 替换旧的巡检快照
-        if "## 巡检快照" in t:
-            t = t.split("\n---\n\n## 巡检快照")[0].rstrip() + "\n"
-        STATE.write_text(t + block, encoding="utf-8")
+        # ★★ 巡检快照必须**插在文件顶部**，且**只保留一份**。
+        #   旧写法 `t.split(marker)[0]` 会把追加在末尾的章节（如 DeepSeek
+        #   机制差异）一起删掉 —— 实测把 _STATE.md 从 12295 字压回 9465 字。
+        #   ⇒ ① 先把**所有**历史快照块删掉（要认带标记与不带标记两种格式）；
+        #     ② 再把新块插在一级标题之后。
+        MARK = "<!-- JB-SNAPSHOT -->"
+
+        def _strip_snapshots(text: str) -> str:
+            """删掉所有「## 巡检快照」块（含旧的 `---` 分隔形式）。"""
+            out_lines = text.splitlines(True)
+            res, i = [], 0
+            while i < len(out_lines):
+                ln = out_lines[i]
+                if ln.strip() == MARK:
+                    i += 1
+                    # 跳过到下一个二级标题为止
+                    while i < len(out_lines) and not out_lines[i].startswith("## "):
+                        i += 1
+                    continue
+                if ln.rstrip() == "## 巡检快照":
+                    # 旧格式：块体到下一个二级/一级标题或文件尾
+                    i += 1
+                    while i < len(out_lines):
+                        nxt = out_lines[i]
+                        if nxt.startswith("## ") or nxt.startswith("# "):
+                            break
+                        i += 1
+                    continue
+                res.append(ln)
+                i += 1
+            txt = "".join(res)
+            # 清掉因删块留下的连续空行与孤立分隔线
+            txt = re.sub(r"\n{3,}", "\n\n", txt)
+            return txt
+
+        t = _strip_snapshots(t)
+        new_block = block.replace("## 巡检快照", f"{MARK}\n## 巡检快照").strip()
+        m = re.search(r"^# .*$", t, re.M)
+        if m:
+            t = t[:m.end()] + "\n\n" + new_block + "\n" + t[m.end():]
+        else:
+            t = new_block + "\n\n" + t
+        STATE.write_text(t, encoding="utf-8")
         print(f"[{now}] 已更新 _STATE.md 巡检快照")
 
     print(f"\n[{'⚠ 有告警' if warn else '✓ 正常'}]")
