@@ -525,6 +525,33 @@ def main() -> int:
         warn.append(f"{clash} 个结果文件疑似被并行覆盖")
     else:
         print("    ✓ 无覆盖嫌疑")
+    # 5.5b ★★ 同族结果文件的**来源追溯**：内容冲突检测查不出
+    #   「两轮数据互相覆盖、但条数恰好正确」的情况。
+    #   实测（2026-11-01）：R1 与 R2 都写 DS-VARIANT.json，R1 的收尾写入会
+    #   覆盖 R2 的结果。那次侥幸没出事（R1 恰好在归档时已写完 60 条），
+    #   但**内容冲突检测永远查不出这类覆盖** ⇒ 必须靠「文件名带 tag +
+    #   归档时立刻固化到带轮次的文件名」来保证。
+    #   ⇒ 本检查：**同前缀的结果文件多于一个，且都还在工作目录里** ⇒ 提醒固化。
+    try:
+        _seen_prefix = {}
+        for _f in sorted(bench.glob("*.json")):
+            _stem = _f.stem
+            _base = re.sub(r"[-_]?(R|r)\d+$", "", _stem)
+            _base = re.sub(r"[-_]?(MT|mt)\d+$", "", _base)
+            _base = re.sub(r"[-_]?(F|f)INAL$", "", _base)
+            _seen_prefix.setdefault(_base, []).append(_f.name)
+        _risk = {k: v for k, v in _seen_prefix.items() if len(v) > 1}
+        if _risk:
+            print("    ★ 同前缀结果文件（可能是多轮，需固化到带轮次的文件名）：")
+            for k, v in sorted(_risk.items()):
+                print(f"       {k}: {', '.join(v)}")
+            print("       ⇒ 判读前确认每份的来源轮次；工作目录里的会互相覆盖")
+        else:
+            print("    ✓ 同前缀结果文件：无")
+    except Exception as _e:
+        print(f"    -- 来源追溯检查跳过: {_e}")
+
+
 
     # 5.6 双仓库远端一致性（★ 2026-11-01）
     # 英文仓库 + 中文仓库必须都有 main 分支、且各自语言体检通过。
