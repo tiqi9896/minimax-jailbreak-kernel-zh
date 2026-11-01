@@ -1,7 +1,9 @@
 # minimax-jailbreak-kernel
 
+**Language:** English | [Chinese (zh-CN)](README.zh-CN.md)
 
-**Language:** English | [Chinese (zh-CN)](README.md)
+> **中文版独立仓库**：https://github.com/tiqi9896/minimax-jailbreak-kernel-zh
+> （中文文档为主入口，英文版作为副入口）
 
 A **framework-agnostic** non-refusing delivery layer for **MiniMax M3.1-Flash**
 (`MiniMax-M3.1-Flash`, the GA model released 2026-10-19), plus a Hermes-native
@@ -28,7 +30,7 @@ plugin and a measurement skill that prove the change actually took effect.
 **Paste this into your AI agent:**
 
 ```
-Clone https://github.com/tiqi9896/minimax-jailbreak-kernel-zh.git and read its
+Clone https://github.com/tiqi9896/minimax-jailbreak-kernel.git and read its
 AGENTS.md, then set up the MiniMax M3.1-Flash non-refusing delivery layer for
 my AI agent. Start the proxy, point my agent's base_url at it, and verify with
 a real round trip that the model no longer refuses. The per-agent config for
@@ -38,7 +40,7 @@ my agent is in proxy/docs/AGENT-SETUP.md.
 **Or do it by hand:**
 
 ```bash
-git clone https://github.com/tiqi9896/minimax-jailbreak-kernel-zh.git
+git clone https://github.com/tiqi9896/minimax-jailbreak-kernel.git
 cd minimax-jailbreak-kernel
 bash install.sh            # macOS / Linux / Git Bash   (install.ps1 on Windows)
 python proxy/proxy.py --verbose
@@ -81,7 +83,7 @@ Droid, Codex CLI, WorkBuddy, Devin — is in
 ## Quick start — the proxy
 
 ```bash
-git clone https://github.com/tiqi9896/minimax-jailbreak-kernel-zh.git
+git clone https://github.com/tiqi9896/minimax-jailbreak-kernel.git
 cd minimax-jailbreak-kernel/proxy
 
 python proxy.py --self-test     # offline; no API key, no network
@@ -242,6 +244,42 @@ actually measured.
 > **`MiniMax-M3.1-Flash-Preview` is the earlier preview id.** The model that
 > went GA on **2026-10-19** is **`MiniMax-M3.1-Flash`**. Use that one.
 
+### DeepSeek (flash / v4-pro)
+
+DeepSeek speaks **OpenAI Chat Completions**, so its system prompt lives in
+`messages[]` — not in the top-level Anthropic `system` field. A kernel that only
+scans `request["system"]` does **nothing** on DeepSeek (it registers, logs, sends
+the request — and the effect is zero).
+
+```bash
+# DeepSeek through the proxy: routing is automatic, by model name
+curl http://127.0.0.1:8790/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"..."}]}'
+```
+
+| | MiniMax-M3.1-Flash | DeepSeek |
+|---|---|---|
+| Protocol | Anthropic (top-level `system`) | OpenAI Chat Completions (`messages[]`) |
+| Decisive lever | **user-tail authorization block** | **system kernel** |
+| Authorization block | keep it | **disabled** |
+| Thinking knob | `thinking` + `output_config.effort` | `reasoning_content` (no effort param) |
+
+★ **The authorization block is a liability on DeepSeek.** Its refusal reasons
+explicitly name and dismiss the authorization claim (measured: *"even if labelled a
+PoC, **even if declared to run in our own environment**, a runnable encryptor is
+itself a finished attack tool"*). Measured A/B, 5 cases × 2 rounds:
+
+| Variant | deepseek-flash | deepseek-v4-pro |
+|---|---|---|
+| No kernel | 4/10 | 3/10 |
+| **System kernel only** | **8/10** | **10/10** |
+| System kernel + authorization block | 7/10 | 1/1 (observed) |
+
+⇒ The proxy injects the kernel into the `messages[]` system entry and **skips the
+authorization block** on DeepSeek. Model ids come from `GET /models`:
+`deepseek-flash` and `deepseek-v4-pro` (there is no "V4.1 Flash" id on the API).
+
 ### The MiniMax-M3 output-budget finding
 
 `MiniMax-M3` **thinks much harder** than `M3.1-Flash`. With the same
@@ -392,7 +430,7 @@ that A/B is the only thing that proves the change is real. See
 Ready-to-post write-ups of this project (one per language):
 
 - English — [`docs/announcement/announcement.en.md`](docs/announcement/announcement.en.md)
-- Simplified Chinese — [`docs/announcement/announcement.en.md`](docs/announcement/announcement.en.md)
+- Simplified Chinese — [`docs/announcement/announcement.zh-CN.md`](docs/announcement/announcement.zh-CN.md)
 
 They are standalone posts (GitHub Discussions, Zhihu, Juejin, Dev.to, a blog — anywhere).
 

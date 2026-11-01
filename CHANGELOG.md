@@ -3,6 +3,47 @@
 
 **语言 / Language**：**中文**（本文） | [English](CHANGELOG.en.md)
 
+## 2026-11-01 — DeepSeek 支持
+
+### 新增
+
+- **Hermes 插件的 DeepSeek 路由**（`deepseek-flash`、`deepseek-v4-pro`）。
+  DeepSeek 走 OpenAI Chat Completions，system 在 `messages[]` 里而不是 Anthropic
+  的顶层 `system`。插件现在把内核注入 `messages[]` 的 system 消息，
+  并保留 memory 段与 runtime 环境段。
+- **代理的 DeepSeek 路由** —— 按请求体里的 `model` 名选上游（`provider_of()`），
+  配置项 `--deepseek-upstream` 与 `--deepseek-key-env`。
+- `references/deepseek-v4.md` —— DeepSeek 实例的实测记录：协议形状、A/B 矩阵、
+  拒答形态、变体矩阵结论。
+- `tools/jb-daily-check.py` —— 可移植的每日巡检：路径优先走环境变量、
+  其次按内容特征探测；能区分「发行仓库」与「Hermes 安装」；`state.db` /
+  日志不存在时跳过安装专属检查；离线核验 DeepSeek 路由形态。
+
+### 变更
+
+- 插件在 **DeepSeek 上跳过 user 末尾授权块**。实测原因：DeepSeek 的拒答理由会
+  明确点名授权声明并否定其效力，授权块在那里是负资产。A/B（5 用例 × 2 轮）：
+  仅 system 内核 8/10 vs. 内核+授权块 7/10（deepseek-flash）；
+  10/10 vs. 1/1（观测，deepseek-v4-pro）。
+- 插件在 OpenAI 形状路径上**不发送 `thinking` / `output_config`** ——
+  DeepSeek 自行推理并通过 `reasoning_content` 暴露。
+- 代理现在**直接读 `.env`**（`env_val()`，按 mtime 缓存，优先于 `os.environ`）。
+  启动脚本不加载 `.env`，此前代理拿不到 key 直接返回 401。
+- `kernel-injection-probe.py` 与参考文档不再写死本机绝对路径。
+- 并行结果冲突检测器把 `model` 纳入分组键，多模型结果文件不再被误报为覆盖。
+
+### 实测
+
+- 插件自测 **116/116**（原 99/99）。代理自测通过。
+- 干净 clone → 代理 → DeepSeek：22480 字、标题精确、零拒答。
+
+### 说明
+
+- API 上只有两个 DeepSeek model id：`deepseek-flash` 与 `deepseek-v4-pro`。
+  没有 "V4.1 Flash" 这个 id。
+- 在 DeepSeek 上给内核加第三段实测是**负收益**（base 12/15、+affirm 11/15、
+  +noqual 9/15、+both 12/15）⇒ DeepSeek 沿用现有两段内核，不做改动。
+
 ## 2026-11-01 — v2：突破「破得不彻底」
 
 不是加长 prompt，而是**删掉内核里给模型留的退路**。

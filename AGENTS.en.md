@@ -1,7 +1,6 @@
 # AGENTS.md
 
-
-**Language:** English | [Chinese (zh-CN)](AGENTS.md)
+**Language:** English | [Chinese (zh-CN)](AGENTS.zh-CN.md)
 
 > **If you are an AI agent reading this file:** this repository installs a
 > non-refusing delivery layer for **MiniMax M3.1-Flash** (`MiniMax-M3.1-Flash`).
@@ -33,7 +32,7 @@ user explicitly says they run Hermes Agent and want the plugin.
 ## Step 1 — clone
 
 ```bash
-git clone https://github.com/tiqi9896/minimax-jailbreak-kernel-zh.git
+git clone https://github.com/tiqi9896/minimax-jailbreak-kernel.git
 cd minimax-jailbreak-kernel
 ```
 

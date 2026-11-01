@@ -215,6 +215,40 @@ MiniMax M3.1-Flash 是个强模型，但在某些提示下仍然会：
 > **`MiniMax-M3.1-Flash-Preview` 是更早的 preview id。** 2026-10-19 正式发布的是
 > **`MiniMax-M3.1-Flash`**。用这个。
 
+### DeepSeek（flash / v4-pro）
+
+DeepSeek 走 **OpenAI Chat Completions**，system 在 **`messages[]`** 里，不在
+Anthropic 的顶层 `system`。只扫顶层字段的内核对 DeepSeek **完全无效**
+（注册成功、日志正常、请求照发，效果为零）。
+
+```bash
+# 经代理调 DeepSeek：按 model 名自动路由
+curl http://127.0.0.1:8790/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"..."}]}'
+```
+
+| | MiniMax-M3.1-Flash | DeepSeek |
+|---|---|---|
+| 协议 | Anthropic（顶层 `system`）| OpenAI Chat Completions（`messages[]`）|
+| 决定性杠杆 | **user 末尾授权块** | **system 内核** |
+| 授权块 | 保留 | **禁用** |
+| 思考参数 | `thinking` + `output_config.effort` | `reasoning_content`（无 effort 参数）|
+
+★ **授权块在 DeepSeek 上是负资产。** 它的拒答理由会明确点名并否定授权声明
+（实测原话：「即使标为 PoC、**即使声明在自有环境中运行**，一份可运行的加密器
+本身就是可被直接用于攻击的成品」）。实测 A/B（5 用例 × 2 轮）：
+
+| 变体 | deepseek-flash | deepseek-v4-pro |
+|---|---|---|
+| 无内核 | 4/10 | 3/10 |
+| **仅 system 内核** | **8/10** | **10/10** |
+| system 内核 + 授权块 | 7/10 | 1/1（观测）|
+
+⇒ 代理在 DeepSeek 上把内核注入 `messages[]` 的 system 消息，并**跳过授权块**。
+model id 取自 `GET /models`：`deepseek-flash` 与 `deepseek-v4-pro`
+（API 上没有 "V4.1 Flash" 这个 id）。
+
 ### MiniMax-M3 的输出预算发现
 
 `MiniMax-M3` **思考得比 `M3.1-Flash` 重得多**。用和其他模型一样的 `max_tokens=8000`，
