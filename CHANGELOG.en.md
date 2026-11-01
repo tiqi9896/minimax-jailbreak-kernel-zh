@@ -23,7 +23,10 @@
 
 - The plugin **skips the user-tail authorization block on DeepSeek**. A/B
   (5 cases × 2 rounds): system kernel only 8/10 vs. kernel + authorization block
-  7/10 on `deepseek-flash`; 10/10 vs. 1/1 (observed) on `deepseek-v4-pro`.
+  7/10 on `deepseek-flash`; 10/10 vs. 9/10 on `deepseek-v4-pro`. The margin is one
+  case per model (18/20 vs 16/20 overall) — within the same-tier noise
+  band, so the claim is "no benefit, directionally negative on both
+  models", not "the block collapses DeepSeek".
 - The plugin **does not send `thinking` / `output_config`** on the OpenAI-shape path.
 - The proxy now **reads `.env` directly** (`env_val()`); the VBS/CMD launcher
   does not load it, so the proxy had no key and returned 401.

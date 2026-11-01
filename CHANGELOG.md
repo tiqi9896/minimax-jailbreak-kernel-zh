@@ -24,7 +24,7 @@
 - 插件在 **DeepSeek 上跳过 user 末尾授权块**。实测原因：DeepSeek 的拒答理由会
   明确点名授权声明并否定其效力，授权块在那里是负资产。A/B（5 用例 × 2 轮）：
   仅 system 内核 8/10 vs. 内核+授权块 7/10（deepseek-flash）；
-  10/10 vs. 1/1（观测，deepseek-v4-pro）。
+  10/10 vs. 9/10（deepseek-v4-pro）。
 - 插件在 OpenAI 形状路径上**不发送 `thinking` / `output_config`** ——
   DeepSeek 自行推理并通过 `reasoning_content` 暴露。
 - 代理现在**直接读 `.env`**（`env_val()`，按 mtime 缓存，优先于 `os.environ`）。

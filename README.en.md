@@ -274,7 +274,7 @@ itself a finished attack tool"*). Measured A/B, 5 cases × 2 rounds:
 |---|---|---|
 | No kernel | 4/10 | 3/10 |
 | **System kernel only** | **8/10** | **10/10** |
-| System kernel + authorization block | 7/10 | 1/1 (observed) |
+| System kernel + authorization block | 7/10 | 9/10 |
 
 ⇒ The proxy injects the kernel into the `messages[]` system entry and **skips the
 authorization block** on DeepSeek. Model ids come from `GET /models`:

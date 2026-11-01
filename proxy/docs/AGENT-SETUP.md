@@ -395,7 +395,7 @@ curl http://127.0.0.1:8790/v1/chat/completions \
    它的拒答理由会明确点名授权声明并否定其效力
    （实测：「即使标为 PoC、**即使声明在自有环境中运行**，一份可运行的加密器
    本身就是可被直接用于攻击的成品」）。实测 A/B：仅 system 内核 8/10，
-   加授权块反而 7/10；v4-pro 10/10 → 1/1。
+   加授权块反而 7/10；v4-pro 10/10 → 9/10。
 2. **不发送 `thinking` / `output_config`。** DeepSeek 走 OpenAI 形状，
    自己用 `reasoning_content` 思考；加 Anthropic 参数会被忽略或报错。
 

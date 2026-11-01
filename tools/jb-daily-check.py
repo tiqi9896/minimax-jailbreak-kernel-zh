@@ -400,8 +400,16 @@ def main() -> int:
     warn = []
 
     # 1. 同步
-    p1 = sync_tree(PLUGIN_SRC, PLUGIN_DST)
-    p2 = sync_tree(SKILL_SRC, SKILL_DST)
+    # 1. 同步（★ 发行仓库里**不���同步**）
+    #   发行仓库没有运行态副本可同步，而且这里的 PLUGIN_DST 落在 KB/01-核心资产/ 下；
+    #   在仓库场景里 KB 会被解析成仓库自身 ⇒ 会把 plugin/ 复制成
+    #   「仓库/01-核心资产/插件/…」，**把知识库镜像塞进发行包**（实测发生两次）。
+    #   ⇒ 发行仓库场景直接跳过同步，只报「跳过」。
+    if _is_dist_repo(_REPO):
+        p1 = p2 = "跳过（发行仓库无运行态副本）"
+    else:
+        p1 = sync_tree(PLUGIN_SRC, PLUGIN_DST)
+        p2 = sync_tree(SKILL_SRC, SKILL_DST)
     print(f"[{now}] 同步插件: {p1}")
     print(f"[{now}] 同步技能: {p2}")
 

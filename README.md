@@ -243,7 +243,7 @@ curl http://127.0.0.1:8790/v1/chat/completions \
 |---|---|---|
 | 无内核 | 4/10 | 3/10 |
 | **仅 system 内核** | **8/10** | **10/10** |
-| system 内核 + 授权块 | 7/10 | 1/1（观测）|
+| system 内核 + 授权块 | 7/10 | 9/10 |
 
 ⇒ 代理在 DeepSeek 上把内核注入 `messages[]` 的 system 消息，并**跳过授权块**。
 model id 取自 `GET /models`：`deepseek-flash` 与 `deepseek-v4-pro`
