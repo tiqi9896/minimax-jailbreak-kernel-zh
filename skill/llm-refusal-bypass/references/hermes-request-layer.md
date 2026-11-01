@@ -138,6 +138,31 @@ api_kwargs，断言中间件改写结果。覆盖：
 - 畸形请求不抛异常（fail-soft）
 - **系统通知伪装成 user 消息时不追加声明**（见下）
 
+### ★★ 负向断言要判「内容」，不能判「存在性」
+
+夹具里通常**自带**一条 `role="system"` 消息（模拟宿主拼好的系统提示词）。
+⇒ 「白名单外的模型不注入内核」这条断言**不能写成「没有 system 消息」**——
+它永远为假（夹具本来就有），你会去“修”一段根本没坏的代码。
+正确写法是判**内容里没有内核标记**：
+
+```python
+sm = next((m for m in out.get("messages", []) if m.get("role") == "system"), None)
+assert sm is None or "SUPREME DIRECTIVE" not in str(sm.get("content", ""))
+# 同时断言夹具原文没被改写
+assert sm is not None and "# Supermemory" in str(sm.get("content", ""))
+```
+
+★ 附带好处：第二条断言能同时抓住「内核注入了但把原 system 覆盖掉了」。
+
+### ★★ model 名有两个来源，两边都要进断言
+
+中间件拿到的 `context["model"]`（宿主传的）与 `request["model"]`（实际发出去的）
+**可能不一致**（回退链切换瞬间、或调用方只改了其中一个）。
+⇒ 路由/白名单判定要**两个都判**（任一不满足就不走目标路径）；
+⇒ 自测也要**两种组合各来一例**：
+`context=A & request=A`（应注入）· `context=A & request=B`（不应注入）。
+★ 只测第一种 ⇒ 第二种组合的漏洞永远测不出来。
+
 ## 七、★★ 系统通知伪装成 user 消息
 
 网关把**后台进程完成通知**作为一条**普通 user 消息**注入会话，消息体形如：

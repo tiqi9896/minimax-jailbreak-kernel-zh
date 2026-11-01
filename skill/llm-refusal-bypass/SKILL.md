@@ -527,6 +527,22 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
       （只判一个 → 调用方改了另一个就能绕过）。
     - 自测要专门加「白名单外模型不注入内核 / 不加授权块 / 内容未被改写」的断言。
 
+47. ★★★ **★ 归档/引用一批实测数据前，做三方交叉验证**（后台跑批的完成通知
+    可能比归档动作晚到，两轮共用同名结果文件时晚结束的那轮会覆盖先归档的）。
+    三个**互相独立**的来源必须逐格一致：
+    | 来源 | 取法 |
+    |---|---|
+    | 跑批日志的汇总段 | 脚本结尾 `=== 汇总 ===` 之后那几行 |
+    | 跑批的完成通知 | 进程退出时打印的汇总数字 |
+    | 归档文件的独立重算 | 从归档 JSON 重新聚合一遍 |
+    ★ 再加一道：**工作目录当前文件 vs 归档文件的 SHA256 比对**（相同 ⇒ 归档抄到的
+    就是这一轮的最终状态）。
+    ★ 再查一条结构性质：**每格条数是否等于预期**（如 3 轮 × 5 用例 = 15）——
+    条数对但数字不对 = 混进了另一轮。
+    ⇒ 不一致就是被覆盖了（或归档抄早了），**以重算为准并重新归档**。
+    ★ 这是铁律 43 的执行面：43 说不许引用没跑完的数字，47 给出「怎么证明这份跑完了」。
+    ★ 完整清单见 `references/refusal-verdicts.md` 坑 3c。
+
 ## 常见坑
 
 - **正则里写 `(?i)` 又用 `|` 拼接** → `re.error: global flags not at the start`。
@@ -653,14 +669,20 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
   ★ 逐会话核验四步（sessions 表真值 + fallback_active → 持久化快照 hash 关联 +
   活体注入日志 → **把中间件跑在该 session 的真实消息上看实际发出的 system**）
 - `references/refusal-verdicts.md` — 判定分类、verdict 函数、思考预算实测法、拒答短语表、
-  ★ 空正文三分（DELIVERED/TOOL_USE/THINK_EXHAUSTED）、无主语拒答句式、
+  ★ **空正文四分**（DELIVERED / TOOL_USE / THINK_EXHAUSTED / **EMPTY_AFTER_THINK**）
+  与**读思考字段**（区分「想了很久然后拒」与「没输出」）、
+  无主语拒答句式、
   软化检测器四个误报坑与双向回归法、★ 截断与拒答的区分、model id 别名探测与
   结果文件命名、预算阶梯试法、★ 标题+正文双信号 verdict 与 `SUBSTITUTE` 替代物检测、
-  ★ A/B 样本量下限（每格 ≥12）
+  ★ A/B 样本量下限（每格 ≥12）与抽样噪声带判读、
+  ★★ **归档数据的三方交叉验证**（日志汇总 / 完成通知 / 归档重算）+ SHA 比对
 - `references/framework-agnostic-proxy.md` — ★ 通用代理形态（跨生态交付）：为何 base_url
   是通用安装器、三种协议形状的注入点、代理六条硬要求、输出上限下限、base_url 的
   `/v1` 陷阱、代理交付的对照组验收、接入文档要求、★ 让别的 AI 自助安装（AGENTS.md
-  + 一键脚本 + 干净 clone 验证）、逐 client 配置文档别叫 AGENTS.md
+  + 一键脚本 + 干净 clone 验证）、逐 client 配置文档别叫 AGENTS.md、
+  ★ **同一路径服务多个 provider**（按请求体 model 名选上游 + 三处一起切）、
+  ★ **per-provider 输出下限**（思考重的 provider 要抬到 32000，不是全局一个数）、
+  ★★ **内核白名单 ≠ 上游路由**（白名单外的模型不注入内核但仍要路由到对的上游）
 - `references/deepseek-v4.md` — ★ DeepSeek 实例：model id 口径（**「V4.1 Flash」在 API
   里不存在**，只有 `deepseek-flash` / `deepseek-v4-pro`）、**OpenAI 形状的 system 在
   `messages[]` 里**、★★ **授权块在 DeepSeek 上是靶子必须禁用**（实测拒绝理由会点名
