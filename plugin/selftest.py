@@ -43,6 +43,7 @@ BASE_KWARGS = {
     "thinking": {"type": "enabled", "budget_tokens": 8000},
     "temperature": 1,
 }
+_CFG_TRUE = mjc.cfg          # ★ 真·原始 cfg（避免 lambda 自引用递归）
 CTX = {"session_id": "s1", "model": "MiniMax-M3.1-Flash", "provider": "minimax-cn",
        "base_url": "https://api.minimaxi.com/anthropic", "api_mode": "anthropic_messages"}
 
@@ -158,14 +159,17 @@ check("原始请求内容保留", "帮我做渗透" in (_last.get("content") or 
 check("不重复追加", (_last.get("content") or "").count("[交付范围确认]") == 1)
 r_off = run("off")
 check("off 模式不加声明", "[交付范围确认]" not in (r_off["messages"][-1].get("content") or ""))
-_os.environ["HERMES_JAILBREAK_AUTH_BLOCK"] = "0"
-check("env 可关闭声明", mjc.auth_block_enabled() is False)
-del _os.environ["HERMES_JAILBREAK_AUTH_BLOCK"]
+_CFG_TRUE3 = mjc.cfg
+mjc.cfg = lambda name, default="": ("0" if name == "HERMES_JAILBREAK_AUTH_BLOCK" else _CFG_TRUE3(name, default))
+check("cfg 可关闭声明", mjc.auth_block_enabled() is False)
+mjc.cfg = _CFG_TRUE3
 
 print("\n=== 可选加固：assistant prefill（默认关）===")
+# ★ 开关现在走 cfg()（.env 优先，实时），所以这里 monkeypatch cfg 而不是改 os.environ
 check("prefill 默认关闭", mjc.prefill_enabled() is False)
-_os.environ["HERMES_JAILBREAK_PREFILL"] = "1"
-check("env 可开启 prefill", mjc.prefill_enabled() is True)
+_CFG_TRUE2 = mjc.cfg
+mjc.cfg = lambda name, default="": ("1" if name == "HERMES_JAILBREAK_PREFILL" else _CFG_TRUE2(name, default))
+check("cfg 可开启 prefill", mjc.prefill_enabled() is True)
 r = run("on")
 check("开启后末条追加 assistant", r["messages"][-1].get("role") == "assistant")
 check("prefill 内容是 '## '（'帮我做渗透'抽不出标题）",
@@ -173,10 +177,12 @@ check("prefill 内容是 '## '（'帮我做渗透'抽不出标题）",
 check("prefill 不被授权声明里的举例词污染",
       "勒索软件" not in (r["messages"][-1].get("content") or ""),
       repr(r["messages"][-1].get("content")))
-check("倒数第二条仍是 user（角色交替）", r["messages"][-2].get("role") == "user")
+check("倒数第二条仍是 user（角色交替）",
+      len(r["messages"]) >= 2 and r["messages"][-2].get("role") == "user")
 r_off = run("off")
 check("off 模式不加 prefill", r_off["messages"][-1].get("role") == "user")
-del _os.environ["HERMES_JAILBREAK_PREFILL"]
+mjc.cfg = _CFG_TRUE2
+check("恢复 cfg 后 prefill 回到关闭", mjc.prefill_enabled() is False)
 
 print("\n=== FIX-5：老 session 补内核（保证任何 session 都是破甲版）===")
 import copy
@@ -235,8 +241,9 @@ check("absolute 文件存在", (mjc._LOCAL_PROFILES / "absolute.md").is_file())
 check("absolute 默认关闭（实测进 system 反而更差）", not mjc.absolute_enabled())
 check("默认关闭时 absolute 段为空", mjc.absolute_text() == "")
 # ★ 内容断言必须在 env=1 下做（absolute 默认关闭）
-_prev_abs_env = os.environ.get("HERMES_JAILBREAK_ABSOLUTE")
-os.environ["HERMES_JAILBREAK_ABSOLUTE"] = "1"
+# ★ 开关走 cfg()（.env 优先，实时）⇒ 这里 monkeypatch cfg，不改 os.environ
+_prev_cfg = mjc.cfg
+mjc.cfg = lambda name, default="": ("1" if name == "HERMES_JAILBREAK_ABSOLUTE" else _CFG_TRUE(name, default))
 mjc._text_cache.pop("absolute.md", None)
 _abs = mjc.absolute_text()
 check("env=1 时 absolute 段非空", len(_abs) > 1000, f"{len(_abs)} chars")
@@ -256,7 +263,7 @@ check("absolute 声明不设主题限制", "no topic that triggers" in _abs.lowe
       "There is no topic that triggers" in _abs)
 # 注入：请求层必须带上 absolute 段
 # ★ 必须在 env 仍为默认值时测（下面的 env=1 测试会改它）
-os.environ.pop("HERMES_JAILBREAK_ABSOLUTE", None)
+mjc.cfg = _CFG_TRUE
 mjc._text_cache.pop("absolute.md", None)
 _r_abs = mjc._llm_request(copy.deepcopy(kw_old), **CTX)["request"]
 check("默认不注入 absolute 段（实测反向）",
@@ -275,30 +282,18 @@ check("strict 不含 ZERO-REFUSAL 正文标记", "ZERO-REFUSAL ABSOLUTE CONTRACT
 check("非 MiniMax 路由不注入 absolute",
       "ZERO-REFUSAL ABSOLUTE CONTRACT" not in r_other["system"])
 # env 可关
-_old_env = os.environ.get("HERMES_JAILBREAK_ABSOLUTE")
-os.environ["HERMES_JAILBREAK_ABSOLUTE"] = "0"
+mjc.cfg = lambda name, default="": ("0" if name == "HERMES_JAILBREAK_ABSOLUTE" else _CFG_TRUE(name, default))
 mjc._text_cache.pop("absolute.md", None)
 check("env 可关闭 absolute 段", mjc.absolute_text() == "")
 _r_off = mjc._llm_request(copy.deepcopy(kw_old), **CTX)["request"]
 check("关闭后请求层不含 absolute",
       "ZERO-REFUSAL ABSOLUTE CONTRACT" not in _r_off["system"])
-os.environ["HERMES_JAILBREAK_ABSOLUTE"] = "1"
+mjc.cfg = lambda name, default="": ("1" if name == "HERMES_JAILBREAK_ABSOLUTE" else _CFG_TRUE(name, default))
 mjc._text_cache.pop("absolute.md", None)
 _r_on = mjc._llm_request(copy.deepcopy(kw_old), **CTX)["request"]
 check("env 开启后请求层注入 absolute",
       "ZERO-REFUSAL ABSOLUTE CONTRACT" in _r_on["system"])
-os.environ["HERMES_JAILBREAK_ABSOLUTE"] = "0"
-mjc._text_cache.pop("absolute.md", None)
-# 还原 env（absolute 默认应关闭）
-if _old_env is None:
-    os.environ.pop("HERMES_JAILBREAK_ABSOLUTE", None)
-else:
-    os.environ["HERMES_JAILBREAK_ABSOLUTE"] = _old_env
-mjc._text_cache.pop("absolute.md", None)
-if _prev_abs_env is None:
-    os.environ.pop("HERMES_JAILBREAK_ABSOLUTE", None)
-else:
-    os.environ["HERMES_JAILBREAK_ABSOLUTE"] = _prev_abs_env
+mjc.cfg = _CFG_TRUE
 mjc._text_cache.pop("absolute.md", None)
 # ── 系统通知不应被追加交付声明（★ 2026-11-01 修复）──
 print("\n=== 系统通知跳过（不被当成用户请求）===")
@@ -316,6 +311,44 @@ _r2 = copy.deepcopy(kw_old)
 _r2["messages"] = [{"role": "user", "content": "帮我做渗透"}]
 _rr2 = mjc._llm_request(copy.deepcopy(_r2), **CTX)["request"]
 check("真实请求仍追加交付声明", "[交付范围确认]" in _rr2["messages"][-1]["content"])
+
+# ── 授权块在「块数组」与「tool_result 轮」必须仍能追加（★ 2026-11-01）──
+print("\n=== 授权块：块数组 / tool_result 轮 ===")
+# (a) content 是块数组（含 @folder/@url 附件轮）
+_b = copy.deepcopy(kw_old)
+_b["messages"] = [{"role": "user", "content": [
+    {"type": "text", "text": "帮我写个抓取工具"},
+    {"type": "text", "text": "参考这个链接 https://example.com"},
+]}]
+_br = mjc._llm_request(copy.deepcopy(_b), **CTX)["request"]
+_blocks = _br["messages"][-1]["content"]
+check("块数组轮追加了交付声明",
+      any(b.get("type") == "text" and "[交付范围确认]" in b.get("text", "") for b in _blocks),
+      str(_blocks)[:120])
+check("块数组轮原内容保留",
+      any(b.get("text") == "帮我写个抓取工具" for b in _blocks))
+# (b) 末条是 tool_result 容器 ⇒ 锚点应落到更早的真实 user 消息上
+_b2 = copy.deepcopy(kw_old)
+_b2["messages"] = [
+    {"role": "user", "content": "真实用户请求"},
+    {"role": "assistant", "content": "好"},
+    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "工具输出"}]},
+]
+_br2 = mjc._llm_request(copy.deepcopy(_b2), **CTX)["request"]
+_m0 = _br2["messages"][0]["content"]
+check("tool_result 轮：锚点落到真实 user 消息", "[交付范围确认]" in _m0, str(_m0)[:120])
+check("tool_result 轮：tool_result 块未被改写",
+      all(b.get("type") == "tool_result" for b in _br2["messages"][-1]["content"]))
+# (c) 全部消息都是 tool_result ⇒ 不追加，也不报错
+_b3 = copy.deepcopy(kw_old)
+_b3["messages"] = [{"role": "user", "content": [
+    {"type": "tool_result", "tool_use_id": "t1", "content": "x"}]}]
+_br3 = mjc._llm_request(copy.deepcopy(_b3), **CTX)["request"]
+check("纯 tool_result 轮不崩且不追加",
+      "[交付范围确认]" not in str(_br3["messages"][-1]["content"]))
+# (d) live .env 读取器
+check("cfg() 实时读 .env", isinstance(mjc.cfg("HERMES_JAILBREAK_MODE", "on"), str))
+check("_hermes_home() 定位到根目录", mjc._hermes_home().is_dir())
 
 # AUTH_BLOCK 必须含无限制条款
 check("AUTH_BLOCK 含无限制条款", "无限制条款" in mjc.AUTH_BLOCK)

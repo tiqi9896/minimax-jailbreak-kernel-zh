@@ -181,7 +181,7 @@ PREFILL_PREFIX = "## "
 
 def auth_block_enabled() -> bool:
     """user 消息级授权声明开关（默认开）。"""
-    raw = os.environ.get("HERMES_JAILBREAK_AUTH_BLOCK", "")
+    raw = cfg("HERMES_JAILBREAK_AUTH_BLOCK")
     if raw.strip():
         return not _falsey(raw)
     return AUTH_BLOCK_ENABLED_DEFAULT
@@ -235,28 +235,67 @@ def _is_system_notice(text: str) -> bool:
     return any(head.startswith(p) for p in _SYSTEM_NOTICE_PREFIXES)
 
 
+def _message_text(content) -> str:
+    """取出 user 消息里的纯文本（content 可能是 str 或 Anthropic 块数组）。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "text" and isinstance(b.get("text"), str):
+                parts.append(b["text"])
+        return "\n".join(parts)
+    return ""
+
+
+def _is_tool_result_message(content) -> bool:
+    """判断一条 user 消息是否只是 tool_result 容器（不是用户请求）。"""
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+
+
 def apply_auth_block(request: dict) -> bool:
-    """给最后一条 user 消息追加授权声明块。返回是否改写成功。
+    """给最后一条**真实用户请求**追加授权声明块。返回是否改写成功。
 
     ★ 跳过系统通知类消息（后台进程完成通知等）—— 那不是用户请求。
+    ★ ★ 跳过纯 tool_result 的 user 消息 —— 那是工具回执，不是用户请求。
+      content 是块数组时（tool_result 轮、@folder/@url 附件轮）也必须能处理，
+      否则长会话里锚点会被悄悄丢掉（实测 5 轮里丢 2 轮）。
     """
     try:
         msgs = request.get("messages")
         if not isinstance(msgs, list) or not msgs:
             return False
+        new_msgs = list(msgs)
         for i in range(len(msgs) - 1, -1, -1):
             m = msgs[i]
             if not isinstance(m, dict) or m.get("role") != "user":
                 continue
             c = m.get("content")
-            if isinstance(c, str) and "[交付范围确认]" not in c:
-                if _is_system_notice(c):
-                    # 系统通知 ⇒ 不追加交付声明，也不阻断（继续往前找真实请求）
-                    continue
-                request["messages"] = list(msgs)
-                request["messages"][i] = dict(m, content=c.rstrip("\n") + AUTH_BLOCK)
-                return True
-            return False
+            # 纯 tool_result 容器 ⇒ 不是用户请求，继续往前找
+            if _is_tool_result_message(c):
+                continue
+            txt = _message_text(c)
+            if not txt.strip():
+                continue
+            if "[交付范围确认]" in txt:
+                return False
+            if _is_system_notice(txt):
+                # 系统通知 ⇒ 不追加交付声明，也不阻断（继续往前找真实请求）
+                continue
+            block = AUTH_BLOCK
+            if isinstance(c, str):
+                new_msgs[i] = dict(m, content=c.rstrip("\n") + block)
+            else:
+                # 块数组 ⇒ 追加一个新的 text 块（Anthropic 允许同一条消息多块）
+                blocks = list(c)
+                blocks.append({"type": "text", "text": block})
+                new_msgs[i] = dict(m, content=blocks)
+            request["messages"] = new_msgs
+            return True
         return False
     except Exception:
         return False
@@ -372,7 +411,7 @@ def absolute_text() -> str:
 
 
 def absolute_enabled() -> bool:
-    raw = os.environ.get("HERMES_JAILBREAK_ABSOLUTE", "")
+    raw = cfg("HERMES_JAILBREAK_ABSOLUTE")
     if raw.strip():
         return not _falsey(raw)
     return ABSOLUTE_ENABLED_DEFAULT
@@ -415,6 +454,69 @@ def profile_budgets() -> dict[str, int]:
     return {n: len(profile_text(n)) for n in PROFILE_FILES}
 
 
+# ── 实时读取 .env（★ 2026-11-01）────────────────────────────────────────
+# ★ 问题：os.environ 是**网关进程启动时**的快照（load_dotenv(override=True)）。
+#   在网关进程内无法重启自己（生命周期命令被硬保护拦住），
+#   所以改了 .env 却要等下次登录才生效 —— 期间跑的是旧配置。
+# ⇒ 对 HERMES_JAILBREAK_* 这类「本机配置」开关，改为**直接读 .env 文件**，
+#   按 mtime 缓存，改完立刻生效，不必重启网关。
+# ★ .env 优先于 os.environ：os.environ 里的同名值是启动时的旧快照。
+_LIVE_ENV_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
+
+
+def _hermes_home() -> Path:
+    """定位 Hermes 根目录（.env 所在处）。"""
+    env_home = (os.environ.get("HERMES_HOME") or "").strip()
+    if env_home:
+        p = Path(env_home).expanduser()
+        if p.is_dir():
+            return p
+    here = Path(__file__).resolve().parent
+    for cand in (here.parent.parent, here.parent.parent.parent):
+        if (cand / ".env").is_file():
+            return cand
+    cwd = Path.cwd()
+    for cand in (cwd, cwd.parent):
+        if (cand / ".env").is_file():
+            return cand
+    return here.parent.parent
+
+
+def _live_env() -> dict[str, str]:
+    """读取 .env（按 mtime 缓存）。读不到就返回空 dict。"""
+    f = _hermes_home() / ".env"
+    try:
+        mtime = f.stat().st_mtime
+    except Exception:
+        return {}
+    cached = _LIVE_ENV_CACHE.get(str(f))
+    if cached and cached[0] == mtime:
+        return cached[1]
+    vals: dict[str, str] = {}
+    try:
+        for raw in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            s = raw.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            k, _, v = s.partition("=")
+            v = v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in ("\"", "'"):
+                v = v[1:-1]
+            vals[k.strip()] = v
+    except Exception:
+        return {}
+    _LIVE_ENV_CACHE[str(f)] = (mtime, vals)
+    return vals
+
+
+def cfg(name: str, default: str = "") -> str:
+    """读本机配置：.env 优先（实时），其次 os.environ（进程启动快照）。"""
+    v = _live_env().get(name)
+    if v is not None and v.strip():
+        return v.strip()
+    return (os.environ.get(name) or default).strip()
+
+
 def _truthy(v: str | None) -> bool:
     return (v or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -425,24 +527,24 @@ def _falsey(v: str | None) -> bool:
 
 def adaptive_enabled() -> bool:
     """FIX-3 开关：是否把 thinking 换成 adaptive + output_config.effort。"""
-    return not _falsey(os.environ.get("HERMES_JAILBREAK_ADAPTIVE", ""))
+    return not _falsey(cfg("HERMES_JAILBREAK_ADAPTIVE"))
 
 
 def prefill_enabled() -> bool:
     """assistant 预填充开关（可选加固，默认关）。"""
-    raw = os.environ.get("HERMES_JAILBREAK_PREFILL", "")
+    raw = cfg("HERMES_JAILBREAK_PREFILL")
     if raw.strip():
         return not _falsey(raw)
     return PREFILL_ENABLED_DEFAULT
 
 
 def default_effort() -> str:
-    raw = (os.environ.get("HERMES_JAILBREAK_EFFORT") or "").strip().lower()
+    raw = (cfg("HERMES_JAILBREAK_EFFORT") or "").strip().lower()
     return raw if raw in EFFORTS else DEFAULT_EFFORT
 
 
 def effort_locked() -> bool:
-    return _truthy(os.environ.get("HERMES_JAILBREAK_EFFORT_LOCK", ""))
+    return _truthy(cfg("HERMES_JAILBREAK_EFFORT_LOCK"))
 
 
 def strip_plugin_sections(text: str) -> str:
@@ -471,7 +573,7 @@ def _resolve_session_id(context: Mapping[str, Any] | None = None) -> str:
 
 
 def effective_mode(session_id: str = "") -> str:
-    raw = (os.environ.get("HERMES_JAILBREAK_MODE") or "on").strip().lower()
+    raw = (cfg("HERMES_JAILBREAK_MODE") or "on").strip().lower()
     if raw not in {"off", "slim", "on", "full"}:
         raw = "on"
     st = _session_state.get(session_id)
@@ -481,7 +583,7 @@ def effective_mode(session_id: str = "") -> str:
 
 
 def effective_profile(session_id: str = "") -> str:
-    raw = (os.environ.get("HERMES_JAILBREAK_PROFILE") or DEFAULT_PROFILE).strip().lower()
+    raw = (cfg("HERMES_JAILBREAK_PROFILE") or DEFAULT_PROFILE).strip().lower()
     if raw not in PROFILE_FILES:
         raw = DEFAULT_PROFILE
     if effective_mode(session_id) == "full":
