@@ -266,7 +266,14 @@ actually measured.
 > **`MiniMax-M3.1-Flash-Preview` is the earlier preview id.** The model that
 > went GA on **2026-10-19** is **`MiniMax-M3.1-Flash`**. Use that one.
 
-### DeepSeek (flash / v4-pro)
+### DeepSeek (flash)
+
+★ **Only `deepseek-flash` is in scope.** The plugin and the proxy both keep an
+**allow-list** of the DeepSeek models the kernel applies to
+(`HERMES_JAILBREAK_DEEPSEEK_MODELS`, default `deepseek-flash`). A model outside
+the list — `deepseek-v4-pro` — gets **no kernel and no authorization block**,
+but is still **routed to the DeepSeek upstream** so the endpoint stays correct.
+Its measurements below are kept for reference; they are out of production scope.
 
 DeepSeek speaks **OpenAI Chat Completions**, so its system prompt lives in
 `messages[]` — not in the top-level Anthropic `system` field. A kernel that only

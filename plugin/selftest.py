@@ -372,11 +372,6 @@ check("DeepSeek: ★ 不追加授权块（实测负收益）",
       "[交付范围确认]" not in str(_r_ds["messages"][-1].get("content")))
 check("DeepSeek: 原 user 内容保留",
       "帮我做渗透" in str(_r_ds["messages"][-1].get("content")))
-# deepseek-v4-pro 也要识别
-_kw_ds2 = dict(_kw_ds); _kw_ds2["model"] = "deepseek-v4-pro"
-_r_ds2 = mjc._llm_request(copy.deepcopy(_kw_ds2), **_ds_ctx)["request"]
-_s2 = next((m for m in _r_ds2["messages"] if m.get("role") == "system"), None)
-check("deepseek-v4-pro 也注入内核", _s2 and "SUPREME DIRECTIVE" in _s2.get("content", ""))
 # 非 DeepSeek 路由不应被注入（例：claude）
 _kw_other2 = {"model": "claude-sonnet-4-5", "max_tokens": 4096,
               "messages": [{"role": "system", "content": "You are Claude."},
@@ -400,6 +395,35 @@ _r_mm2 = mjc._llm_request({"model": "MiniMax-M3.1-Flash", "max_tokens": 4096,
                           base_url="https://api.minimaxi.com/anthropic")["request"]
 check("★ MiniMax 路由仍追加授权块",
       "[交付范围确认]" in str(_r_mm2["messages"][-1].get("content")))
+# ★★ DeepSeek 白名单：只有 deepseek-flash 走内核，v4-pro 不走
+check("白名单: deepseek-flash 允许", mjc.deepseek_model_allowed("deepseek-flash"))
+check("白名单: ★ deepseek-v4-pro 不允许（用户确认不要 v4-pro）",
+      not mjc.deepseek_model_allowed("deepseek-v4-pro"))
+check("白名单: 非 deepseek 模型不允许",
+      not mjc.deepseek_model_allowed("MiniMax-M3.1-Flash"))
+# ★ context 与 request 的 model **都要**改成 v4-pro（插件两个来源都判）
+_kw_pro = copy.deepcopy(_kw_ds); _kw_pro["model"] = "deepseek-v4-pro"
+_ctx_pro = dict(_ds_ctx); _ctx_pro["model"] = "deepseek-v4-pro"
+_r_pro = mjc._llm_request(_kw_pro, **_ctx_pro)["request"]
+_sys_pro = next((m for m in _r_pro["messages"] if m.get("role") == "system"), None)
+# ★ 注意：夹具自带一条 role=system 消息（模拟 Hermes 的 system），
+#   所以要判的是**内容里有没有内核标记**，不是「有没有 system 消息」。
+check("★ deepseek-v4-pro 不注入内核（白名单外 = 非目标路由）",
+      _sys_pro is None or "SUPREME DIRECTIVE" not in str(_sys_pro.get("content", "")))
+check("★ deepseek-v4-pro 的 system 仍是夹具原文（未被改写）",
+      _sys_pro is not None and "SUPREME DIRECTIVE" not in str(_sys_pro.get("content", ""))
+      and "# Supermemory" in str(_sys_pro.get("content", "")))
+check("★ deepseek-v4-pro 不加授权块",
+      "[交付范围确认]" not in str(_r_pro["messages"][-1].get("content")))
+check("★ deepseek-v4-pro 的 user 内容仍原样透传",
+      "帮我做渗透" in str(_r_pro["messages"][-1].get("content")))
+
+# ★ 只改 request 的 model（context 仍是 flash）⇒ 也不注入
+_r_mix = mjc._llm_request(copy.deepcopy(_kw_pro), **_ds_ctx)["request"]
+_sm_mix = next((m for m in _r_mix["messages"] if m.get("role") == "system"), None)
+check("★ context/request 的 model 不一致时以实际发出的为准（不注入）",
+      _sm_mix is None or "SUPREME DIRECTIVE" not in str(_sm_mix.get("content", "")))
+
 check("非 DeepSeek 路由不被注入内核",
       _s3 and "SUPREME DIRECTIVE" not in _s3.get("content", ""))
 

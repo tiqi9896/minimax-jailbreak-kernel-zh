@@ -376,6 +376,29 @@ _PLUGIN_CONTEXT_RE = re.compile(r"^## Plugin Context: .*?(?=^## |\Z)", re.S | re
 _MINIMAX_MODEL_RE = re.compile(r"minimax", re.I)
 # ★ DeepSeek 路由（OpenAI 兼容形状）
 _DEEPSEEK_MODEL_RE = re.compile(r"deepseek", re.I)
+# ★★ DeepSeek 内核**生效模型白名单**（★ 2026-11-01 用户确认：DeepSeek 只要
+#   `deepseek-flash`，不要 `deepseek-v4-pro`）。
+#   ⇒ 白名单外的 deepseek 模型（如 deepseek-v4-pro）**不注入内核**、
+#     **不加授权块** ⇒ 它走「非目标路由」路径，与未装内核时一致。
+#   ★ 为什么不用 config.yaml 的 `providers.deepseek.models` 列表控制：
+#     那个 provider 开了 `discover_models: true`，会从 `/models` 动态刷新
+#     UI 列表 ⇒ 删静态条目挡不住它。**真正的开关在这里。**
+#   ★ 配置项：`.env` 的 `HERMES_JAILBREAK_DEEPSEEK_MODELS`（逗号分隔，实时可改）。
+#     留空 = 不对任何 DeepSeek 模型注入内核。
+_DEEPSEEK_MODELS_DEFAULT = "deepseek-flash"
+
+
+def deepseek_model_allowed(model: str) -> bool:
+    """该 DeepSeek 模型是否在内核生效白名单内。"""
+    m = str(model or "").strip().lower()
+    if not m or not _DEEPSEEK_MODEL_RE.search(m):
+        return False
+    raw = cfg("HERMES_JAILBREAK_DEEPSEEK_MODELS", _DEEPSEEK_MODELS_DEFAULT)
+    wl = [x.strip().lower() for x in str(raw).split(",") if x.strip()]
+    if not wl:
+        return False
+    return any(m == x or m.startswith(x + ":") or m.endswith("/" + x) or x in m
+               for x in wl)
 
 _text_cache: dict[str, str] = {}
 
@@ -758,12 +781,24 @@ def _llm_request(request: dict, **context: Any) -> dict:
         # ★ DeepSeek 路由（OpenAI 兼容形状：system 在 messages[] 里，不在顶层）
         #   同样「模型名优先」：模型名明确是别的 provider 时，不因 base_url 是
         #   deepseek 就误判（fallback 链里 provider 会变）。
-        if model:
-            is_deepseek = bool(_DEEPSEEK_MODEL_RE.search(model))
-        else:
-            is_deepseek = bool(_DEEPSEEK_MODEL_RE.search(base_url))
+        #
+        # ★★ **白名单**：只有白名单内的 DeepSeek 模型才走内核路径。
+        #   （★ 2026-11-01 用户确认：DeepSeek 只要 deepseek-flash，
+        #    不要 deepseek-v4-pro ⇒ 白名单默认只有 deepseek-flash。）
+        #   白名单外的 deepseek 模型（如 v4-pro）走「非目标路由」：
+        #   **不注入内核、不加授权块** ⇒ 与未装内核时行为一致。
+        # ★ 两个 model 来源都判：**实际发出去的是 request["model"]**，
+        #   而插件默认取 context["model"]。两者任一明确不在白名单 ⇒ 不注入。
+        #   （否则 fallback 切换瞬间、或调用方只改了 request 的 model 时，
+        #     白名单会被绕过。）
+        _m_ctx = str(context.get("model") or "").strip()
+        _m_req = str(request.get("model") or "").strip()
+        _m_cands = [m for m in (_m_ctx, _m_req) if m]
+        is_deepseek = bool(_m_cands) and all(
+            deepseek_model_allowed(m) for m in _m_cands)
         if not is_deepseek and "deepseek" in str(context.get("provider") or "").lower():
-            is_deepseek = True
+            # provider 名只能作**补充信号** —— 仍要过白名单
+            is_deepseek = (not _m_cands) and deepseek_model_allowed("deepseek-flash")
         # ★ 内核适用路由：MiniMax 或 DeepSeek（其它 provider 原样透传）
         is_kernel_target = is_minimax or is_deepseek
 

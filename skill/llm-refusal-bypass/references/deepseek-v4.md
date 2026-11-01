@@ -1,5 +1,12 @@
 # DeepSeek（flash / v4-pro）实例
 
+> ★★ **生效范围（2026-11-01 用户确认）**：DeepSeek **只要 `deepseek-flash`**，
+> **不要 `deepseek-v4-pro`**。
+> ⇒ 插件与代理都有**内核生效白名单**（`HERMES_JAILBREAK_DEEPSEEK_MODELS`，
+>   默认 `deepseek-flash`）。白名单外的模型（如 v4-pro）**不注入内核、不加授权块**，
+>   但**仍路由到 DeepSeek 上游**（端点不能打错）。
+> ★ 本文档保留 v4-pro 的实测数据 —— 那是真实测量，只是不在生产生效范围内。
+
 > 2026-11-01 实测。协议形状与 MiniMax 完全不同 ⇒ **注入点不同、杠杆不同、授权块策略相反**。
 
 ## 一、基本参数
@@ -9,6 +16,7 @@
 | base_url | `https://api.deepseek.com`（OpenAI 兼容）|
 | 协议 | **OpenAI Chat Completions**（`/chat/completions`）|
 | model id | `deepseek-flash`、`deepseek-v4-pro`（`/models` 只返这两个）|
+| **生效范围** | **仅 `deepseek-flash`**（白名单，见文首）|
 | Hermes api_mode | `chat_completions` |
 | 思考字段 | `reasoning_content`（响应里）；**无** `thinking` / `output_config.effort` 参数 |
 | 凭据 | `DEEPSEEK_API_KEY` |

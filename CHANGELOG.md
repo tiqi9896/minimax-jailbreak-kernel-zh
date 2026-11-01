@@ -3,6 +3,22 @@
 
 **语言 / Language**：**中文**（本文） | [English](CHANGELOG.en.md)
 
+## [未发布] — DeepSeek 生效范围收窄到 deepseek-flash
+
+用户确认：DeepSeek 只要 `deepseek-flash`，不要 `deepseek-v4-pro`。
+
+- 插件与代理新增 **DeepSeek 内核生效白名单**
+  （`HERMES_JAILBREAK_DEEPSEEK_MODELS`，默认 `deepseek-flash`）。
+  白名单外的模型**不注入内核、不加授权块**。
+- ★ **上游路由与内核注入必须分开**：白名单外的模型**仍路由到 DeepSeek 上游**，
+  否则请求会打到错误的 provider。
+- ★ **白名单才是真正的开关**，不是 provider 的模型列表 ——
+  `providers.deepseek` 开了 `discover_models: true`，会从 `/models` 动态刷新，
+  所以删 config.yaml 的静态条目挡不住它。
+- 插件**同时检查 context 与 request 两个来源的 model** —— 实际发出去的是
+  request 里的那个，两者不一致时不能绕过白名单。
+- 插件自测 **125/125**（原 118/118）。
+
 ## 2026-11-01 — DeepSeek 支持
 
 ### 新增

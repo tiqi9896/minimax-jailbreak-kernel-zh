@@ -241,8 +241,31 @@ def _read_kernel(name: str) -> str:
 
 
 # ★ provider 判定：按请求体的 model 名（★ 模型名优先于路径）
+# ★★ DeepSeek 内核**生效模型白名单**（★ 2026-11-01 用户确认：DeepSeek 只要
+#   `deepseek-flash`，不要 `deepseek-v4-pro`）。
+#   ★ 注意区分两件事：
+#     · **上游路由**（往哪个端点发）—— 按 "deepseek" 前缀判定，
+#       白名单外的模型**也要**路由到 DeepSeek 上游，否则请求会打错端点。
+#     · **内核注入**（要不要加内核/授权块）—— 按白名单判定，
+#       白名单外的模型**不注入**，与插件口径一致。
+_DEEPSEEK_MODELS_DEFAULT = "deepseek-flash"
+
+
+def deepseek_model_allowed(model: str) -> bool:
+    """该 DeepSeek 模型是否在内核生效白名单内。"""
+    m = str(model or "").strip().lower()
+    if not m or "deepseek" not in m:
+        return False
+    raw = env_val("HERMES_JAILBREAK_DEEPSEEK_MODELS", _DEEPSEEK_MODELS_DEFAULT)
+    wl = [x.strip().lower() for x in str(raw).split(",") if x.strip()]
+    if not wl:
+        return False
+    return any(m == x or m.startswith(x + ":") or m.endswith("/" + x) or x in m
+               for x in wl)
+
+
 def provider_of(body: dict, flavour: str = "openai") -> str:
-    """返回 "minimax" / "deepseek"。"""
+    """返回 "minimax" / "deepseek"（★ 只决定**上游端点**，不决定是否注入内核）。"""
     model = ""
     if isinstance(body, dict):
         model = str(body.get("model") or "")
@@ -601,7 +624,8 @@ class Handler(BaseHTTPRequestHandler):
 
         # 解析 + 注入（★ 任何异常都放行原请求，fail-soft）
         body: dict = {}
-        injected = {"kernel": False, "auth": False, "effort": None, "floor": 0}
+        injected = {"kernel": False, "auth": False, "effort": None, "floor": 0,
+                    "skipped": False}
         try:
             body = json.loads(raw.decode("utf-8"))
         except Exception:
@@ -621,7 +645,12 @@ class Handler(BaseHTTPRequestHandler):
                 effort = self.cfg.get("effort") or env_effort()
                 before = json.dumps(body, ensure_ascii=False)
                 if flavour == "deepseek":
-                    body = inject_deepseek(body, kernel, ds_floor)
+                    # ★ 白名单外（如 deepseek-v4-pro）：**不注入内核**，
+                    #   但仍路由到 DeepSeek 上游（端点不能错）。
+                    if deepseek_model_allowed(str(body.get("model") or "")):
+                        body = inject_deepseek(body, kernel, ds_floor)
+                    else:
+                        injected["skipped"] = True
                 elif flavour == "anthropic":
                     body = inject_anthropic(body, kernel, effort)
                 elif flavour == "responses":
@@ -803,6 +832,12 @@ def self_test() -> int:
     _dsr2 = inject_deepseek(json.loads(json.dumps(_dsr)), k)
     _sys_msgs = [m for m in _dsr2["messages"] if m.get("role") == "system"]
     check("DeepSeek: 幂等（不重复注入 system）", len(_sys_msgs) == 1)
+    # ★ 白名单：v4-pro 不注入内核（但仍路由到 DeepSeek 上游）
+    check("白名单: deepseek-flash 允许", deepseek_model_allowed("deepseek-flash"))
+    check("白名单: ★ deepseek-v4-pro 不允许",
+          not deepseek_model_allowed("deepseek-v4-pro"))
+    check("白名单: provider 判定仍把 v4-pro 路由到 deepseek",
+          provider_of({"model": "deepseek-v4-pro"}) == "deepseek")
     check("DeepSeek: provider 判定",
           provider_of({"model": "deepseek-v4-pro"}) == "deepseek"
           and provider_of({"model": "MiniMax-M3.1-Flash"}) == "minimax")

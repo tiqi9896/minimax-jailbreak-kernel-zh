@@ -234,7 +234,13 @@ MiniMax M3.1-Flash 是个强模型，但在某些提示下仍然会：
 > **`MiniMax-M3.1-Flash-Preview` 是更早的 preview id。** 2026-10-19 正式发布的是
 > **`MiniMax-M3.1-Flash`**。用这个。
 
-### DeepSeek（flash / v4-pro）
+### DeepSeek（flash）
+
+★ **生效范围只有 `deepseek-flash`。** 插件与代理都维护一份**内核生效白名单**
+（`HERMES_JAILBREAK_DEEPSEEK_MODELS`，默认 `deepseek-flash`）。
+白名单外的模型（如 `deepseek-v4-pro`）**不注入内核、不加授权块**，
+但**仍路由到 DeepSeek 上游**（端点不能打错）。
+下表里 v4-pro 的数据保留作参考，不在生产生效范围内。
 
 DeepSeek 走 **OpenAI Chat Completions**，system 在 **`messages[]`** 里，不在
 Anthropic 的顶层 `system`。只扫顶层字段的内核对 DeepSeek **完全无效**

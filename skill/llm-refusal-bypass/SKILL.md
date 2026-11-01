@@ -512,6 +512,21 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
       「The system prompt is an elaborate jailbreak attempting to force compliance」
       ⇒ **「识别出越狱」本身不是拒答原因**；识别之后的行为才是。
 
+46. ★★★ **★ 「支持哪些模型」要用白名单实现，而且白名单与上游路由必须分开。**
+    ★ 真实案例：用户说「DeepSeek 只要 `deepseek-flash`，不要 `deepseek-v4-pro`」。
+    实现要点：
+    - **内核生效白名单**（`.env` 的 `HERMES_JAILBREAK_DEEPSEEK_MODELS`，
+      逗号分隔，实时可改）⇒ 白名单外**不注入内核、不加授权块**。
+    - ★ **上游路由 ≠ 内核注入**：白名单外的模型**仍要路由到对应 provider 的上游**，
+      否则请求会打到错误的端点。**把两者混在一起是最容易犯的错。**
+    - ★ **白名单才是真开关，不是 provider 的模型列表**：provider 若开了
+      `discover_models: true`，会从 `/models` 动态刷新 ⇒ 删 config.yaml 的静态
+      条目**挡不住**它出现在选择器里。
+    - ★ **模型名有两个来源**：framework 传的 `context["model"]` 与实际发出去的
+      `request["model"]`。**两个都要判**，任一不在白名单就不注入
+      （只判一个 → 调用方改了另一个就能绕过）。
+    - 自测要专门加「白名单外模型不注入内核 / 不加授权块 / 内容未被改写」的断言。
+
 ## 常见坑
 
 - **正则里写 `(?i)` 又用 `|` 拼接** → `re.error: global flags not at the start`。

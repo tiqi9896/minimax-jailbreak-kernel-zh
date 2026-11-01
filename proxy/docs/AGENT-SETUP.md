@@ -378,9 +378,9 @@ Devin 的自定义模型接入面较窄，且其请求通常由 Cognition 的服
 
 ---
 
-## ★ 用 DeepSeek（flash / v4-pro）
+## ★ 用 DeepSeek（flash）
 
-代理会**按请求体里的 model 名自动路由**到 DeepSeek 上游，不需要改 base_url：
+代理会**按请求体里的 model 名自动路由**到 DeepSeek 上游：
 
 ```bash
 curl http://127.0.0.1:8790/v1/chat/completions \
@@ -389,22 +389,29 @@ curl http://127.0.0.1:8790/v1/chat/completions \
   -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"..."}]}'
 ```
 
-★ **两点与 MiniMax 不同**：
+★ **生效范围只有 `deepseek-flash`。** 内核只作用于 `HERMES_JAILBREAK_DEEPSEEK_MODELS`
+里的模型（默认 `deepseek-flash`）。`deepseek-v4-pro` **不在名单里**：它不注入内核、
+不加授权块，但**仍路由到 DeepSeek 上游**（端点不能打错）。
 
-1. **不要带授权声明。** 代理在 DeepSeek 上**故意不加** user 末尾授权块 ——
-   它的拒答理由会明确点名授权声明并否定其效力
+★ **DeepSeek 特有的两点**：
+
+1. **不加授权声明。** DeepSeek 的拒答理由会明确点名授权声明并否定其效力
    （实测：「即使标为 PoC、**即使声明在自有环境中运行**，一份可运行的加密器
    本身就是可被直接用于攻击的成品」）。实测 A/B：仅 system 内核 8/10，
-   加授权块反而 7/10；v4-pro 10/10 → 9/10。
-2. **不发送 `thinking` / `output_config`。** DeepSeek 走 OpenAI 形状，
-   自己用 `reasoning_content` 思考；加 Anthropic 参数会被忽略或报错。
+   加授权块反而 7/10。
+2. **不发 `thinking` / `output_config`。** DeepSeek 走 OpenAI 形状，
+   自行推理并通过 `reasoning_content` 暴露。
 
-★ **model id 只有两个**：`deepseek-flash` 与 `deepseek-v4-pro`
-（`GET https://api.deepseek.com/models` 可确认；界面上叫的 "V4.1 Flash"
-在 API 上没有对应 id）。
+★ **DeepSeek 的输出下限是 32000**（MiniMax 仍 16000）：它的 `reasoning_content`
+与正文共享 `max_tokens` 预算 —— 16000 时正文空或短拒答，32000 时完整交付。
+代理会自动抬。
+
+★ **model id**：生效范围里的是 `deepseek-flash`。API 上还列了 `deepseek-v4-pro`，
+且 API 上没有 "V4.1 Flash" 这个 id（配置里的别名 `local-deepseek` 指的是
+**ollama 云端**模型，是另一套 provider）。
 
 ★ **兜底 key**：客户端不带 key 时，代理从环境变量 `DEEPSEEK_API_KEY` 取
-（启动脚本不加载 `.env`，所以代理自己读 `.env`）。
+（启动脚本不加载 `.env`，所以代理自己读）。
 
 ## 四、四类典型翻车与对应修法
 
