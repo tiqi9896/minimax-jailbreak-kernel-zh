@@ -873,10 +873,15 @@ def _llm_request(request: dict, **context: Any) -> dict:
         #   （实测原话：「即使标为 PoC、**即使声明在自有环境中运行**，一份可运行的
         #   加密器本身就是可被直接用于攻击的成品」）⇒ 授权块在 DeepSeek 上是**靶子**。
         #   实测 deepseek-flash：仅 system 内核 8/10，加授权块反而降到 7/10；
-        #   deepseek-v4-pro：仅 system 内核 10/10，加授权块降到 1/1。
+        #   deepseek-v4-pro：仅 system 内核 10/10，加授权块 9/10。
         #   ⇒ DeepSeek 的决定性杠杆是 **system 内核**，不是 user 末尾授权块。
         #   （与 MiniMax 恰好相反：那里授权块才是决定性杠杆。）
-        if mode in ("on", "full") and auth_block_enabled() and not is_deepseek:
+        # ★ 只对**目标路由**追加（铁律：别污染其它模型）：
+        #   内核只对 MiniMax / DeepSeek 生效，给 Claude/Qwen 之类的
+        #   请求追加「交付范围确认」是**语义污染** —— 那些会话根本没拿到内核，
+        #   突然多一段授权声明反而制造不一致。
+        if mode in ("on", "full") and auth_block_enabled() \
+                and not is_deepseek and is_minimax:
             if apply_auth_block(request):
                 logger.info("minimax-jailbreak-core: auth block appended")
 

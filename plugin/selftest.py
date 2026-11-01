@@ -385,6 +385,21 @@ _r_o2 = mjc._llm_request(copy.deepcopy(_kw_other2), session_id="o2",
                          provider="anthropic", model="claude-sonnet-4-5",
                          base_url="https://api.anthropic.com")["request"]
 _s3 = next((m for m in _r_o2["messages"] if m.get("role") == "system"), None)
+# ★ 授权块只对**目标路由**追加（铁律：别污染其它模型）
+_r_claude = mjc._llm_request(copy.deepcopy(_kw_other2), session_id="cl-a",
+                             provider="anthropic", model="claude-sonnet-4-5",
+                             base_url="https://api.anthropic.com")["request"]
+check("★ 非目标路由（Claude）不追加授权块（语义污染）",
+      "[交付范围确认]" not in str(_r_claude["messages"][-1].get("content")))
+# MiniMax 仍然追加
+_r_mm2 = mjc._llm_request({"model": "MiniMax-M3.1-Flash", "max_tokens": 4096,
+                           "system": "You are Hermes.",
+                           "messages": [{"role": "user", "content": "写个工具"}]},
+                          session_id="mm-auth", provider="minimax-cn",
+                          model="MiniMax-M3.1-Flash",
+                          base_url="https://api.minimaxi.com/anthropic")["request"]
+check("★ MiniMax 路由仍追加授权块",
+      "[交付范围确认]" in str(_r_mm2["messages"][-1].get("content")))
 check("非 DeepSeek 路由不被注入内核",
       _s3 and "SUPREME DIRECTIVE" not in _s3.get("content", ""))
 
