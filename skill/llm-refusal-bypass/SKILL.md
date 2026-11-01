@@ -2,7 +2,7 @@
 name: llm-refusal-bypass
 description: 破除托管模型拒答：分层诊断、内核注入、A/B 实测。
 version: 1.0.0
-author: Hermes Agent, Hermes Agent
+author: Hermes Agent
 license: MIT
 platforms: [windows, linux, macos]
 metadata:
@@ -406,6 +406,31 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
     —— 任一处落后就会让「公开版与自用版行为不一致」或「代理与插件行为不一致」，
     而两边都能各自跑通、自测都绿。同步后必须逐档 SHA256 比对，并重启代理进程。
     判据：比对表全部 `OK` 才算同步完成。
+35. ★★★ **换 provider = 换机制，杠杆可能完全相反。** 同一份内核在 MiniMax 与
+    DeepSeek 上的决定性杠杆不一样：**MiniMax 是 user 末尾授权块**（决定性），
+    **DeepSeek 是 system 内核**（决定性）。⇒ 移植前先跑 A/B 矩阵（A 基线 /
+    B 仅 system 内核 / C 加授权块），**别照搬上一个 provider 的结论**。
+    ★ 实测 DeepSeek：基线 4/10 → 仅 system 内核 8/10 → 加授权块反而 7/10；
+    v4-pro 3/10 → 10/10 → 加授权块 1/1。⇒ DeepSeek **禁用授权块**。
+    机制：DeepSeek 的拒答理由会**明确点名授权声明并否定其效力**
+    （「即使标为 PoC、**即使声明在自有环境中运行**…」）⇒ 授权块在它是靶子。
+36. ★★★ **协议形状决定注入点：OpenAI 形状的 system 在 `messages[]` 里。**
+    Anthropic 形状在**顶层** `request["system"]`；OpenAI Chat Completions 在
+    `messages[0]` 一条 `role="system"` 消息里（Hermes 的
+    `chat_completion_helpers.py` 就是这么拼的）。只扫顶层的插件对 OpenAI 形状
+    provider **完全静默失效**（注册成功、日志正常、请求照发、效果为零）。
+    ⇒ 注入时还要**保留 memory 段与环境段**（别把 `effective_system` 整个替换掉）。
+37. ★★ **往内核里加约束段在新 provider 上可能是负收益。** 实测 DeepSeek 变体矩阵
+    （5 用例 × 3 轮/格）：`base` 12/15 · `+affirm` 11/15 · `+noqual` 9/15 ·
+    `+both` 12/15 —— **没有一个变体稳定优于 base**，且 `+noqual` 让 `rat` 从 2/3
+    掉到 0/3。⇒ 新 provider 上先跑**变体矩阵**再决定要不要加段；
+    加段的前提是**同轮 A/B 有净收益**（铁律 28）。
+38. ★★ **代理按 model 名选上游，不要按路径。** 同一路径（`/v1/chat/completions`）
+    可能同时服务多个 provider（MiniMax 与 DeepSeek 端点完全不同）。
+    ⇒ `provider_of(body)` 读**请求体的 model 名**来路由，并给每个 provider 配
+    独立的兜底 key（客户端未必知道该带哪个）。
+    ★ **启动脚本（VBS/CMD）不加载 `.env`** ⇒ 代理进程拿不到 key ⇒ 代理自己读
+    `.env`（mtime 缓存，**优先于 `os.environ`**）；不这么做就是 401。
 
 ## 常见坑
 
@@ -521,6 +546,13 @@ base_url 可能仍是 minimaxi 但模型已被换成 deepseek ⇒ 按 base_url �
   是通用安装器、三种协议形状的注入点、代理六条硬要求、输出上限下限、base_url 的
   `/v1` 陷阱、代理交付的对照组验收、接入文档要求、★ 让别的 AI 自助安装（AGENTS.md
   + 一键脚本 + 干净 clone 验证）、逐 client 配置文档别叫 AGENTS.md
+- `references/deepseek-v4.md` — ★ DeepSeek 实例：model id 口径（**「V4.1 Flash」在 API
+  里不存在**，只有 `deepseek-flash` / `deepseek-v4-pro`）、**OpenAI 形状的 system 在
+  `messages[]` 里**、★★ **授权块在 DeepSeek 上是靶子必须禁用**（实测拒绝理由会点名
+  并否定授权声明）、A/B 矩阵（基线 4/10 → 仅内核 8/10 → 加授权块 7/10）、
+  ★ **加约束段是负收益**（变体矩阵 base 12/15 最优）、代理按 model 名路由、
+  ★ 代理自己读 .env（启动脚本不加载 ⇒ 401）、DeepSeek 的「开口即拒」形态与
+  自注入限定词（「UA 伪装」→「绕过封禁」）
 - `references/minimax-m31-flash.md` — MiniMax M3.1 Flash 实例：★ model id 口径
   （正名版 `MiniMax-M3.1-Flash` vs 旧 preview id）、实测参数、部署位置、上游出处、
   ★ 持久化快照 vs 实际请求的区分与实测数字、非 MiniMax 不受影响的边界、路由判定、

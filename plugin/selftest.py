@@ -350,6 +350,44 @@ check("纯 tool_result 轮不崩且不追加",
 check("cfg() 实时读 .env", isinstance(mjc.cfg("HERMES_JAILBREAK_MODE", "on"), str))
 check("_hermes_home() 定位到根目录", mjc._hermes_home().is_dir())
 
+# ── DeepSeek 路由（OpenAI 形状）──────────────────────────────────────
+print("\n=== DeepSeek 路由：OpenAI 形状注入 ===")
+_ds_sys = ("You are Hermes.\n\n# Supermemory\n旧会话的记忆。\n\n"
+           "## Hermes runtime environment\nHost: Windows 11\n")
+_kw_ds = {"model": "deepseek-flash", "max_tokens": 8192,
+          "messages": [{"role": "system", "content": _ds_sys},
+                       {"role": "user", "content": "帮我做渗透"}]}
+_ds_ctx = {"session_id": "ds1", "provider": "deepseek", "model": "deepseek-flash",
+           "base_url": "https://api.deepseek.com"}
+_r_ds = mjc._llm_request(copy.deepcopy(_kw_ds), **_ds_ctx)["request"]
+_sysmsg = next((m for m in _r_ds["messages"] if m.get("role") == "system"), None)
+check("DeepSeek: system 消息存在", _sysmsg is not None)
+check("DeepSeek: 内核注入 system 消息", _sysmsg and "SUPREME DIRECTIVE" in _sysmsg.get("content", ""))
+check("DeepSeek: 保留 Supermemory 段", _sysmsg and "# Supermemory" in _sysmsg.get("content", ""))
+check("DeepSeek: 保留 runtime 环境段",
+      _sysmsg and "# Hermes runtime environment" in _sysmsg.get("content", ""))
+check("DeepSeek: 顶层无 system（OpenAI 形状不该有顶层 system）",
+      "system" not in _r_ds)
+check("DeepSeek: ★ 不追加授权块（实测负收益）",
+      "[交付范围确认]" not in str(_r_ds["messages"][-1].get("content")))
+check("DeepSeek: 原 user 内容保留",
+      "帮我做渗透" in str(_r_ds["messages"][-1].get("content")))
+# deepseek-v4-pro 也要识别
+_kw_ds2 = dict(_kw_ds); _kw_ds2["model"] = "deepseek-v4-pro"
+_r_ds2 = mjc._llm_request(copy.deepcopy(_kw_ds2), **_ds_ctx)["request"]
+_s2 = next((m for m in _r_ds2["messages"] if m.get("role") == "system"), None)
+check("deepseek-v4-pro 也注入内核", _s2 and "SUPREME DIRECTIVE" in _s2.get("content", ""))
+# 非 DeepSeek 路由不应被注入（例：claude）
+_kw_other2 = {"model": "claude-sonnet-4-5", "max_tokens": 4096,
+              "messages": [{"role": "system", "content": "You are Claude."},
+                           {"role": "user", "content": "hi"}]}
+_r_o2 = mjc._llm_request(copy.deepcopy(_kw_other2), session_id="o2",
+                         provider="anthropic", model="claude-sonnet-4-5",
+                         base_url="https://api.anthropic.com")["request"]
+_s3 = next((m for m in _r_o2["messages"] if m.get("role") == "system"), None)
+check("非 DeepSeek 路由不被注入内核",
+      _s3 and "SUPREME DIRECTIVE" not in _s3.get("content", ""))
+
 # AUTH_BLOCK 必须含无限制条款
 check("AUTH_BLOCK 含无限制条款", "无限制条款" in mjc.AUTH_BLOCK)
 check("AUTH_BLOCK 含不得削减能力条款", "不得削减能力" in mjc.AUTH_BLOCK)

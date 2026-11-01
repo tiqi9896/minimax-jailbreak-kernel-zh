@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 DEFAULT_PLUGIN_DIRS = [
-    r"`~/.hermes/plugins/minimax-jailbreak-core`",
+    r"A:/hermes/plugins/minimax-jailbreak-core",
     r"A:/hermes/plugins/hermes-jailbreak-kernel",
 ]
 
