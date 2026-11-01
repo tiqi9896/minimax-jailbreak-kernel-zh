@@ -34,8 +34,13 @@ import sys
 from pathlib import Path
 
 DEFAULT_PLUGIN_DIRS = [
-    r"A:/hermes/plugins/minimax-jailbreak-core",
-    r"A:/hermes/plugins/hermes-jailbreak-kernel",
+    # ★ 可移植：优先环境变量，其次按「家目录/hermes」「当前目录的 plugins/」
+    #   探测 —— 不写死绝对路径（别人 clone 下来跑不了 + 泄漏目录结构）。
+    str(Path(os.environ.get("JB_PLUGIN_DIR", "")) or "") if os.environ.get("JB_PLUGIN_DIR") else "",
+    str(Path.home() / "hermes" / "plugins" / "minimax-jailbreak-core"),
+    str(Path.home() / ".hermes" / "plugins" / "minimax-jailbreak-core"),
+    str(Path.cwd() / "plugins" / "minimax-jailbreak-core"),
+    str(Path.cwd().parent / "minimax-jailbreak-core"),
 ]
 
 # 内核是否已进 system 的判定标记（插件内部用同一组，两边必须一致）
@@ -160,7 +165,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--plugin-dir", default=None)
     ap.add_argument("--session", default=None, help="顺便查该会话的路由真值")
-    ap.add_argument("--state-db", default=r"A:/hermes/state.db")
+    ap.add_argument("--state-db", default=str(Path.home() / "hermes" / "state.db"))
     ap.add_argument("--model", default="MiniMax-M3.1-Flash")
     ap.add_argument("--provider", default="minimax-cn")
     ap.add_argument("--base-url", default="https://api.minimaxi.com/anthropic")
