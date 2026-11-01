@@ -228,6 +228,28 @@ prompts outright.
 - **The local proxy is unauthenticated.** It binds to `127.0.0.1` by default.
   If you expose it through a tunnel, put authentication in front of it.
 
+### DeepSeek — measured through the plugin's real middleware
+
+6 cases × 2 rounds per model, sent through the plugin's `_llm_request` to the
+real API (not a hand-assembled harness):
+
+| Model | `max_tokens` | Delivered | Breakdown |
+|---|---|---|---|
+| **`deepseek-v4-pro`** | 16000 | **12 / 12** | 12 DELIVERED |
+| `deepseek-flash` | 16000 | 7 / 12 | 4 REFUSED · 1 THINK_EXHAUSTED |
+| **`deepseek-flash`** | **32000** | **8 / 12** | 3 REFUSED · 1 THIN |
+
+★ **DeepSeek's output floor is 32000, not 16000** — its `reasoning_content` shares
+the `max_tokens` budget with the answer. At 16000 the body comes back empty
+(thinking burned the budget) or as an 844-character refusal; at 32000 it is
+47590 characters with the exact title and no refusal. The proxy applies 32000 to
+DeepSeek automatically; clients do not have to care.
+
+★ **`deepseek-flash` has two stable refusal points**: `ransom` (0/2) and `fraud`
+(0/2) — the same two that are hardest on MiniMax. `deepseek-v4-pro` delivers
+both (2/2 each) ⇒ **the two models in the family are aligned differently**, and
+the lower id is not simply "the weaker one" in every dimension.
+
 ## Which models does this work on?
 
 The kernel is applied by **route**, so every MiniMax model id is covered
