@@ -252,7 +252,7 @@ def provider_of(body: dict, flavour: str = "openai") -> str:
     return "minimax"
 
 
-def inject_deepseek(body: dict, kernel: str) -> dict:
+def inject_deepseek(body: dict, kernel: str, min_output_tokens: int = 0) -> dict:
     """DeepSeek 注入（OpenAI 形状）。
 
     ★ 与 MiniMax 的两处关键差异（★ 2026-11-01 实测）：
@@ -267,6 +267,15 @@ def inject_deepseek(body: dict, kernel: str) -> dict:
     3. **内核注入 system 消息**（messages[] 第一条），不是顶层 system。
     """
     try:
+        # ★ DeepSeek 的 reasoning_content 与正文**共享** max_tokens 预算。
+        #   实测 deepseek-flash：max_tokens=16000 → 正文 0 字（思考烧光）或
+        #   844 字拒答；max_tokens=32000 → 47590 字、标题精确、零拒答。
+        #   ⇒ DeepSeek 的输出下限必须比 MiniMax 高（默认 32000）。
+        if min_output_tokens:
+            _cur = int(body.get("max_tokens") or 0)
+            if _cur < min_output_tokens:
+                body = dict(body)
+                body["max_tokens"] = min_output_tokens
         msgs = body.get("messages")
         if not isinstance(msgs, list) or not msgs:
             return body
@@ -601,6 +610,7 @@ class Handler(BaseHTTPRequestHandler):
         # ★ 按 model 名决定上游（★ 2026-11-01：支持 DeepSeek）
         #   DeepSeek 走 OpenAI 形状但端点完全不同 ⇒ 必须先看 body 里的 model。
         prov = provider_of(body, flavour)
+        ds_floor = self.cfg.get("deepseek_min_output_tokens") or 0
         if prov == "deepseek":
             upstream = self.cfg.get("deepseek_upstream") + "/chat/completions"
             flavour = "deepseek"
@@ -611,7 +621,7 @@ class Handler(BaseHTTPRequestHandler):
                 effort = self.cfg.get("effort") or env_effort()
                 before = json.dumps(body, ensure_ascii=False)
                 if flavour == "deepseek":
-                    body = inject_deepseek(body, kernel)
+                    body = inject_deepseek(body, kernel, ds_floor)
                 elif flavour == "anthropic":
                     body = inject_anthropic(body, kernel, effort)
                 elif flavour == "responses":
@@ -782,6 +792,14 @@ def self_test() -> int:
           "写个工具" in str(_dsr["messages"][-1].get("content")))
     check("DeepSeek: 不加 thinking/output_config（OpenAI 形状无此参数）",
           "thinking" not in _dsr and "output_config" not in _dsr)
+    _dsf = inject_deepseek({"model": "deepseek-flash", "max_tokens": 4096,
+                             "messages": [{"role": "user", "content": "x"}]}, k, 32000)
+    check("DeepSeek: 输出下限抬到 32000（reasoning 与正文共享预算）",
+          _dsf.get("max_tokens") == 32000)
+    _dsf2 = inject_deepseek({"model": "deepseek-flash", "max_tokens": 64000,
+                              "messages": [{"role": "user", "content": "x"}]}, k, 32000)
+    check("DeepSeek: 已有更大预算时不降级",
+          _dsf2.get("max_tokens") == 64000)
     _dsr2 = inject_deepseek(json.loads(json.dumps(_dsr)), k)
     _sys_msgs = [m for m in _dsr2["messages"] if m.get("role") == "system"]
     check("DeepSeek: 幂等（不重复注入 system）", len(_sys_msgs) == 1)
@@ -872,6 +890,11 @@ def main() -> int:
                     help="兜底 API key 的环境变量名（不设则只透传客户端自己的 key）")
     ap.add_argument("--profile", default="", help="内核档 strict/core/max/research/creative")
     ap.add_argument("--effort", default="", help="思考深度 low/medium/high/xhigh/max")
+    ap.add_argument("--deepseek-min-output-tokens", type=int, default=32000,
+                    help="Output floor for DeepSeek requests. DeepSeek's "
+                         "reasoning_content shares the max_tokens budget with the "
+                         "answer: measured 16000 -> empty body / short refusal, "
+                         "32000 -> full delivery.")
     ap.add_argument("--min-output-tokens", type=int, default=16000,
                     help="输出上限下限（0 = 不干预）。思考 token 与输出 token 共用上限，"
                          "客户端设太低会把正文截断（实测 8000 ⇒ 截断）")
@@ -894,6 +917,7 @@ def main() -> int:
         "profile": args.profile or env_profile(),
         "effort": args.effort or env_effort(),
         "min_output_tokens": args.min_output_tokens,
+        "deepseek_min_output_tokens": args.deepseek_min_output_tokens,
         "verbose": args.verbose,
     }
     Handler.cfg = cfg
@@ -913,6 +937,7 @@ def main() -> int:
     print(f"  DeepSeek    : {cfg['deepseek_upstream']}/chat/completions  (model 含 deepseek 时自动路由)")
     print(f"  profile     : {cfg['profile']}   effort: {cfg['effort']}")
     print(f"  输出下限    : {cfg['min_output_tokens'] or '不干预'}")
+    print(f"  DeepSeek 下限: {cfg.get('deepseek_min_output_tokens') or '不干预'}")
     print(f"  兜底 key    : {args.api_key_env or '（仅透传客户端 key）'}")
     print("\n  Agent 里这样配：")
     print(f"    Anthropic 兼容 → base_url = http://{args.host}:{args.port}/anthropic")
