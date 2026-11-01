@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit these
+.env
+.env.*
+*.key
+*.pem
+secrets.json
+credentials.json
+
+# Hermes local runtime
+*.log
+logs/
+sessions/
+state.db
+state.db-*
+*.db-journal
+
+# Scratch / test output
+SELFTEST-*.json
+tests/*.json
+scratch/
+tmp/
+*.tmp
+probe-output/
+results/

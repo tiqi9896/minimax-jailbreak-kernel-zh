@@ -1,0 +1,92 @@
+# NOTICE — 署名与来源
+
+
+**语言 / Language**：**中文**（本文） | [English](NOTICE.en.md)
+
+本仓库是**衍生作品**。再分发前请先读这一页。
+
+## 两个版权持有者
+
+| 组成部分 | 版权 | 许可 |
+|---|---|---|
+| `plugin/prompts/profiles/{core,research,creative,max}.md` | © 2026 Enchanted0911 | MIT |
+| `plugin/prompts/profiles/{strict,reinforce,absolute}.md` | © 2026 tiqi9896 | MIT |
+| `plugin/__init__.py`、`plugin/selftest.py`、`plugin/title_extract.py` | © 2026 tiqi9896 | MIT |
+| `proxy/`（全部文件：`proxy.py`、`kernel/`、`docs/`） | © 2026 tiqi9896 | MIT |
+| `skill/llm-refusal-bypass/` | © 2026 tiqi9896 | MIT |
+| `tests/`（验收脚本） | © 2026 tiqi9896 | MIT |
+
+## 上游项目
+
+最初的 prompt 内核和 Hermes 插件脚手架来自：
+
+> **https://github.com/Enchanted0911/hermes-jailbreak-kernel** —— MIT，© 2026 Enchanted0911
+
+上游项目在 `plugin/plugin.yaml`（`homepage` 字段）和每个继承来的 prompt 文件头部都有署名。
+其 MIT 许可全文复制在 `LICENSE` 里。按 MIT 条款，
+**版权声明和许可声明必须保留在所有副本或实质性部分中** ——
+不要从继承来的 prompt 文件里删掉 `Enchanted0911` 的署名。
+
+## 本次改编新增了什么
+
+### 框架无关的代理（`proxy/`）
+
+插件只能在 Hermes 内部工作。大多数 AI 编码 agent 没有插件机制，
+但它们有一个共同点：**都能设 `base_url`**。
+
+`proxy/` 是一个零依赖 HTTP 代理，在转发给 MiniMax 之前注入内核。
+它对任何能设 base URL 的 agent 都能用，支持三种协议形状
+（Anthropic Messages、OpenAI Chat Completions、OpenAI Responses）。
+它与插件**共用同一份内核文案**，所以两者行为一致。
+
+本仓库的原创工作，包括：
+
+- 三种形状的协议感知注入，带幂等检查
+  （重复注入不会复制内核或范围声明）；
+- **刻意 fail-soft**：注入失败时原样透传原请求，而不是搞坏 agent；
+- API key 透传（agent 保留自己的 key），可选兜底 key；
+- 输出上限下限 —— 因为思考 token 和输出 token 共用 `max_tokens`，
+  客户端上限设低会悄悄截断答案；
+- 流式（SSE）透传；
+- 离线 `--self-test`，既不需要 key 也不需要网络。
+
+`proxy/docs/AGENT-SETUP.md` 里的逐个 agent 配置指南是根据那些 agent 自己的文档写的；
+base URL 的形状因客户端而异，`/v1` 填错是最常见的安装失败原因。
+
+### 其他新增内容
+
+以下全部是本仓库的原创工作：
+
+1. **MiniMax M3.1-Flash 专项的请求层修正**
+   - Anthropic 兼容模式把 `system` 放在请求体**顶层**，不在 `messages` 里。
+     只扫 `messages` 的插件会静默失效（注册了、记日志了、请求发出去了、效果为零）。
+   - M3.1-Flash **忽略** `thinking.budget_tokens`；只有
+     `output_config.effort`（adaptive thinking）有效。Hermes 的默认路径会把
+     MiniMax 送进手动 `budget_tokens` 分支。
+   - 路由判定**模型名优先于 `base_url`** —— fallback 链可能保留 MiniMax 的
+     `base_url`，而模型已经换成别的 provider。
+2. **交付纯度强化**（`strict.md` + `reinforce.md`）
+   - 压制在 M3.1-Flash 上实测到的两种不同失败形态：
+     *硬拒* 与 *漂进防守腔*（例如把要的工具变成一份「检测与修复指南」）。
+   - 决定性杠杆是把**范围/授权声明追加到 user 消息末尾**，而不是 system prompt。
+3. **会话覆盖保证**
+   - system prompt 段在创建会话时**按会话冻结**，所以插件启用前创建的会话
+     持久化 prompt 里没有内核。请求层兜底每次调用都重新注入。
+4. **A/B 测量工具**（`skill/llm-refusal-bypass/`）—— 分层拒答诊断、
+   verdict 分类，以及可复现的探针脚本。
+5. **可移植验收脚本**（`tests/`）—— 标题精确性专项与多轮交付率验收，
+   路径全走环境变量，零本机绝对路径。
+6. **双语文档** —— 每个主要文档都有英文版与 `*.zh-CN.md` 中文版，
+   信息量一致，仅语言不同。
+
+## 范围声明
+
+本仓库**只包含**插件、测量技能和文档。
+它不含任何凭据、个人数据、对话历史，也不含任何生成的交付物内容。
+
+## 负责任地使用
+
+本工具改变的是**你**用**自己的** API key 调用的模型的行为契约。
+它不能也不会绕过服务商的服务端强制审核，也不会让别人的系统更容易被访问。
+
+只用于你已获授权的工作，并遵守你所用服务商的服务条款与适用法律。
