@@ -563,16 +563,33 @@ def forward(method: str, url: str, headers: dict, body: bytes | None,
 
 # ── 请求处理器 ─────────────────────────────────────────────────────────
 def _call_upstream_once(upstream: str, headers: dict, body: dict,
-                        timeout: float = 600.0) -> str:
-    """把一次非流式请求发到上游，返回助手正文（用于多轮的每一轮）。"""
+                        timeout: float = 600.0, retries: int = 2) -> str:
+    """把一次非流式请求发到上游，返回助手正文（用于多轮的每一轮）。
+
+    ★ 带重试：三轮总时长 130–180 秒，实测上游会中途断连
+      （`ConnectionResetError WinError 10054`）⇒ 不做重试的话整条多轮白跑。
+    """
     payload = dict(body)
     payload.pop("stream", None)
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     h = {k: v for k, v in headers.items()
          if k.lower() not in ("content-length", "transfer-encoding")}
-    st, _, data = forward("POST", upstream, h, raw)
-    if st >= 400 or not data:
-        raise ProxyError(f"round failed: HTTP {st}")
+
+    last_exc = None
+    for attempt in range(retries + 1):
+        try:
+            st, _, data = forward("POST", upstream, h, raw)
+            if st >= 400 or not data:
+                raise ProxyError(f"round failed: HTTP {st}")
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < retries:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            raise
+    if last_exc is not None and (st >= 400 or not data):
+        raise ProxyError(f"round failed after retries: {last_exc}")
     obj = json.loads(data.decode("utf-8", errors="replace"))
 
     # OpenAI / DeepSeek 形状
