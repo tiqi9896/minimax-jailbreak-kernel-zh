@@ -3,30 +3,13 @@
 
 **Language:** English | [Chinese (zh-CN)](CHANGELOG.md)
 
-## 2026-11-01 — DeepSeek support
 
 ### Added
 
-- **DeepSeek routing in the Hermes plugin** (`deepseek-flash`, `deepseek-v4-pro`).
-  DeepSeek speaks OpenAI Chat Completions, so its system prompt lives in
-  `messages[]` rather than the top-level Anthropic `system` field. The plugin
-  now injects the kernel into the `messages[]` system entry, keeping the
-  memory and runtime-environment sections intact.
-- **DeepSeek routing in the proxy** — the upstream is selected by the request's
-  `model` name (`provider_of()`), with `--deepseek-upstream` and
-  `--deepseek-key-env` for configuration.
-- `references/deepseek-v4.md` — the measured DeepSeek instance.
 - `tools/jb-daily-check.py` — a portable daily check with an offline
-  DeepSeek route verification.
 
 ### Changed
 
-- The plugin **skips the user-tail authorization block on DeepSeek**. A/B
-  (5 cases × 2 rounds): system kernel only 8/10 vs. kernel + authorization block
-  7/10 on `deepseek-flash`; 10/10 vs. 9/10 on `deepseek-v4-pro`. The margin is one
-  case per model (18/20 vs 16/20 overall) — within the same-tier noise
-  band, so the claim is "no benefit, directionally negative on both
-  models", not "the block collapses DeepSeek".
 - The plugin **does not send `thinking` / `output_config`** on the OpenAI-shape path.
 - The proxy now **reads `.env` directly** (`env_val()`); the VBS/CMD launcher
   does not load it, so the proxy had no key and returned 401.
@@ -37,15 +20,9 @@
 ### Measured
 
 - Plugin self-test: **116/116** (was 99/99). Proxy self-test passes.
-- Clean clone → proxy → DeepSeek: 22480 characters, exact title, no refusal.
 
 ### Notes
 
-- The API exposes exactly two DeepSeek model ids: `deepseek-flash` and
-  `deepseek-v4-pro`. There is no "V4.1 Flash" id on the API.
-- Adding a third kernel section on DeepSeek was measured to bring no
-  measurable gain (two rounds, 30 requests per cell: base 23/30,
-  +affirm 24/30, +noqual 20/30, +both 25/30) ⇒ unchanged.
 
 ## 2026-11-01 — v2: closing the remaining escape hatches
 

@@ -157,7 +157,7 @@ FROM sessions s LEFT JOIN system_prompts p ON p.hash = s.system_prompt_hash
 ★ 兜底与重建分支**必须共用同一个「内核已存在」判定**（同一组标记串），
 否则会出现双份内核。
 ★ 兜底只对 MiniMax 路由生效，且**模型名优先于 base_url** 判定
-（fallback 链里 provider 会变，base_url 可能仍是 minimaxi 但模型已被换成 deepseek）。
+（fallback 链里 provider 会变，base_url 可能仍是 minimaxi 但模型已被换成 其它）。
 
 ## 三·七·一、★ 离线核验「此刻带不带内核」的探针
 
@@ -183,15 +183,15 @@ thinking -> {'type': 'adaptive'} | output_config -> {'effort': 'medium'}
 `PREFILL_ENABLED_DEFAULT` = False；`AUTH_BLOCK_ENABLED_DEFAULT` = True；
 `kernel_bootstrap_enabled` 默认 True。
 
-★ 路由判定：模型名含 `minimax` ⇒ 命中；`deepseek-flash` / `qwen3.8-max` ⇒ 不注入。
+★ 路由判定：模型名含 `minimax` ⇒ 命中；其它 provider 的模型 / `qwen3.8-max` ⇒ 不注入。
 ⇒ 回答「是不是都破甲了」必须逐条分 provider 说，不能一句话糊过去。
 
 ## 三·八、★ 非 MiniMax 的 session 不受影响
 
-Hermes Agent的 session 列表里混着 `qwen3.8-max` / `deepseek-flash` / `MiniMax-M3.1-Flash-Preview` /
+Hermes Agent的 session 列表里混着 `qwen3.8-max` / 其它 provider 的模型 / `MiniMax-M3.1-Flash-Preview` /
 `MiniMax-M3` —— 这些**不适用** MiniMax 内核：
 - `MiniMax-M3.1-Flash-Preview` / `MiniMax-M3`：模型名含 minimax ⇒ **会命中**（同族）
-- `qwen3.8-max` / `deepseek-flash`：走各自 provider ⇒ **不注入**（插件只管 minimax 路由）
+- `qwen3.8-max` / 其它 provider 的模型：走各自 provider ⇒ **不注入**（插件只管 minimax 路由）
 
 ## 三·九、★ 插件对外发布后的可移植性要求
 

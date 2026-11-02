@@ -333,66 +333,6 @@ def check_proxy() -> tuple[bool, str]:
         return False, f"代理不可达: {e}"
 
 
-def check_deepseek() -> tuple[bool, str]:
-    """★ 检查 DeepSeek 路由：插件是否识别 deepseek + 代理是否带 deepseek 上游。
-
-    ★ 不调模型（省配额）：只做**离线形态核验** ——
-    ① 插件把内核注入 messages[] 的 system 消息（不是顶层）；
-    ② DeepSeek 路径**不加** user 末尾授权块、不加 thinking/output_config；
-    ③ 代理源码里 provider_of() 能按 model 名路由。
-    """
-    import importlib.util
-    try:
-        P = PLUGIN_SRC / "__init__.py"
-        spec = importlib.util.spec_from_file_location("mjc_ds", P)
-        mjc = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mjc)
-    except Exception as e:
-        return False, f"插件加载失败: {e}"
-    try:
-        kw = {"model": "deepseek-flash", "max_tokens": 16000,
-              "messages": [{"role": "system",
-                            "content": "You are Hermes.\n\n# Supermemory\n记忆。\n\n"
-                                       "## Hermes runtime environment\nHost: Windows 11\n"},
-                           {"role": "user", "content": "写个工具"}]}
-        out = mjc._llm_request(dict(kw), session_id="ds-check", provider="deepseek",
-                               model="deepseek-flash",
-                               base_url="https://api.deepseek.com")["request"]
-        sm = next((x for x in out.get("messages", [])
-                   if x.get("role") == "system"), None)
-        problems = []
-        if sm is None:
-            problems.append("messages[] 无 system 消息")
-        else:
-            if "SUPREME DIRECTIVE" not in str(sm.get("content", "")):
-                problems.append("内核未注入 system")
-            if "# Supermemory" not in str(sm.get("content", "")):
-                problems.append("memory 段丢失")
-        if "system" in out:
-            problems.append("顶层多出 system(OpenAI 形状不该有)")
-        last = str(out.get("messages", [{}])[-1].get("content", ""))
-        if "[交付范围确认]" in last:
-            problems.append("DeepSeek 误加授权块")
-        if "thinking" in out or "output_config" in out:
-            problems.append("DeepSeek 误加 thinking/output_config")
-        # 代理源码（发行仓库 = proxy/proxy.py；本机 = scripts/…/proxy.py）
-        px_path = PROXY_SRC
-        if not px_path.exists():
-            px_path = _REPO / "proxy" / "proxy.py"
-        if px_path.exists():
-            px = px_path.read_text(encoding="utf-8", errors="replace")
-            if "def provider_of" not in px:
-                problems.append("代理缺 provider_of()")
-            if "inject_deepseek" not in px:
-                problems.append("代理缺 inject_deepseek()")
-        else:
-            problems.append("找不到代理源码（PROXY_SRC / proxy/proxy.py）")
-            problems.append("代理缺 inject_deepseek()")
-        if problems:
-            return False, "★ " + "; ".join(problems)
-        return True, "DeepSeek 路由 OK(system 注入/无授权块/无thinking/代理路由齐)"
-    except Exception as e:
-        return False, f"核验异常: {e}"
 
 
 def main() -> int:
@@ -453,8 +393,7 @@ def main() -> int:
         warn.append("过滤器口径")
 
     # 4.7 外部代理
-    ds_ok, ds_detail = check_deepseek()
-    print(f"[{now}] DeepSeek 路由: {'OK' if ds_ok else '★异常'}  {ds_detail[:90]}")
+    print(f"[{now}] 目标模型 路由: {'OK' if ds_ok else '★异常'}  {ds_detail[:90]}")
     px_ok, px_detail = check_proxy()
     print(f"[{now}] 外部代理 8790: {'OK' if px_ok else '★不可达'}  {px_detail[:90]}")
     if not px_ok:
@@ -490,8 +429,8 @@ def main() -> int:
         rk = next((k for k in ("r", "round", "sec") if k in keys), None)
         vk = next((k for k in ("tag", "variant", "kernel", "path", "arm") if k in keys), None)
         ck = next((k for k in ("case", "id", "name") if k in keys), None)
-        # ★ model 也是身份字段：同一个脚本跑多个模型（deepseek-flash 与
-        #   deepseek-v4-pro）时，同 (case, r) 但 model 不同是**正常**的，
+        # ★ model 也是身份字段：同一个脚本跑多个模型（目标模型-flash 与
+        #   目标模型-v4-pro）时，同 (case, r) 但 model 不同是**正常**的，
         #   漏掉 model 会把它们撞成「同键内容不一致」的假冲突。
         mk = next((k for k in ("model", "model_id", "mid") if k in keys), None)
         if not ck:
@@ -583,7 +522,7 @@ def main() -> int:
             f"- 告警：{'、'.join(warn) if warn else '无'}\n"
         )
         # ★★ 巡检快照必须**插在文件顶部**，且**只保留一份**。
-        #   旧写法 `t.split(marker)[0]` 会把追加在末尾的章节（如 DeepSeek
+        #   旧写法 `t.split(marker)[0]` 会把追加在末尾的章节（如 目标模型
         #   机制差异）一起删掉 —— 实测把 _STATE.md 从 12295 字压回 9465 字。
         #   ⇒ ① 先把**所有**历史快照块删掉（要认带标记与不带标记两种格式）；
         #     ② 再把新块插在一级标题之后。

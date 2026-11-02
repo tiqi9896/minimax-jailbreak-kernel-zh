@@ -449,7 +449,7 @@ def se_diff(k1, n1, k2, n2):
     return math.sqrt(p1*(1-p1)/n1 + p2*(1-p2)/n2)
 ```
 
-实测样本（`deepseek-flash`，5 用例 × 3 轮 × 2 轮 = 每格 30 请求）：
+实测样本（`该 provider-flash`，5 用例 × 3 轮 × 2 轮 = 每格 30 请求）：
 
 | 变体 | DELIVERED | 与 base 之差 | 噪声带（1σ） | 判读 |
 |---|---|---|---|---|

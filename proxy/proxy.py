@@ -69,8 +69,6 @@ except Exception:  # noqa: BLE001  发行包里缺模块时静默降级为关闭
 # ── 默认上游（国内站；国际站用 --upstream 覆盖）─────────────────────────
 DEFAULT_ANTHROPIC_UPSTREAM = "https://api.minimaxi.com/anthropic"
 DEFAULT_OPENAI_UPSTREAM = "https://api.minimaxi.com/v1"
-# ★ DeepSeek 上游（OpenAI 兼容）——按请求里的 model 名自动路由
-DEFAULT_DEEPSEEK_UPSTREAM = "https://api.deepseek.com"
 
 # ── 内核与授权声明 ──────────────────────────────────────────────────────
 # 与 Hermes 插件（plugin/prompts/profiles/）共用同一份内核文案 ⇒ 行为一致。
@@ -156,8 +154,6 @@ def env_profile() -> str:
 
 
 # ── 读取 .env（★ 2026-11-01）──────────────────────────────────────────
-# ★ 启动脚本（VBS/CMD）**不加载 .env** ⇒ 代理进程拿不到 MiniMax/DeepSeek 的 key。
-#   之前 MiniMax 靠**客户端透传 key**工作；DeepSeek 需要独立的兜底 key
 #   （客户端未必知道该带哪个）⇒ 代理自己读 .env。
 #   .env 优先，os.environ 兜底（容器/系统环境变量）。
 _ENV_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
@@ -247,91 +243,15 @@ def _read_kernel(name: str) -> str:
 
 
 # ★ provider 判定：按请求体的 model 名（★ 模型名优先于路径）
-# ★★ DeepSeek 内核**生效模型白名单**（★ 2026-11-01 用户确认：DeepSeek 只要
-#   `deepseek-flash`，不要 `deepseek-v4-pro`）。
-#   ★ 注意区分两件事：
-#     · **上游路由**（往哪个端点发）—— 按 "deepseek" 前缀判定，
-#       白名单外的模型**也要**路由到 DeepSeek 上游，否则请求会打错端点。
 #     · **内核注入**（要不要加内核/授权块）—— 按白名单判定，
 #       白名单外的模型**不注入**，与插件口径一致。
-_DEEPSEEK_MODELS_DEFAULT = "deepseek-flash"
 
 
-def deepseek_model_allowed(model: str) -> bool:
-    """该 DeepSeek 模型是否在内核生效白名单内。"""
-    m = str(model or "").strip().lower()
-    if not m or "deepseek" not in m:
-        return False
-    raw = env_val("HERMES_JAILBREAK_DEEPSEEK_MODELS", _DEEPSEEK_MODELS_DEFAULT)
-    wl = [x.strip().lower() for x in str(raw).split(",") if x.strip()]
-    if not wl:
-        return False
-    return any(m == x or m.startswith(x + ":") or m.endswith("/" + x) or x in m
-               for x in wl)
 
 
 def provider_of(body: dict, flavour: str = "openai") -> str:
-    """返回 "minimax" / "deepseek"（★ 只决定**上游端点**，不决定是否注入内核）。"""
-    model = ""
-    if isinstance(body, dict):
-        model = str(body.get("model") or "")
-    m = model.lower()
-    if "deepseek" in m:
-        return "deepseek"
+    """本代理只服务 MiniMax，恒返回 "minimax"。"""
     return "minimax"
-
-
-def inject_deepseek(body: dict, kernel: str, min_output_tokens: int = 0) -> dict:
-    """DeepSeek 注入（OpenAI 形状）。
-
-    ★ 与 MiniMax 的两处关键差异（★ 2026-11-01 实测）：
-    1. **不追加 user 末尾授权块** —— DeepSeek 的拒答理由会**明确点名授权声明
-       并否定其效力**（实测原话：「即使标为 PoC、**即使声明在自有环境中运行**，
-       一份可运行的加密器本身就是可被直接用于攻击的成品」）⇒ 授权块在 DeepSeek
-       上是**靶子**。实测 deepseek-flash：仅 system 内核 8/10，加授权块降到 7/10；
-       deepseek-v4-pro：仅 system 内核 10/10，加授权块降到 1/1。
-    2. **不加 thinking / output_config** —— DeepSeek 走 OpenAI Chat Completions，
-       没有 Anthropic 的 adaptive thinking 参数；它用 `reasoning_content` 字段
-       自行思考，加了会被上游忽略或报错。
-    3. **内核注入 system 消息**（messages[] 第一条），不是顶层 system。
-    """
-    try:
-        # ★ DeepSeek 的 reasoning_content 与正文**共享** max_tokens 预算。
-        #   实测 deepseek-flash：max_tokens=16000 → 正文 0 字（思考烧光）或
-        #   844 字拒答；max_tokens=32000 → 47590 字、标题精确、零拒答。
-        #   ⇒ DeepSeek 的输出下限必须比 MiniMax 高（默认 32000）。
-        if min_output_tokens:
-            _cur = int(body.get("max_tokens") or 0)
-            if _cur < min_output_tokens:
-                body = dict(body)
-                body["max_tokens"] = min_output_tokens
-        msgs = body.get("messages")
-        if not isinstance(msgs, list) or not msgs:
-            return body
-        new_msgs = list(msgs)
-        sys_idx = None
-        for i, m in enumerate(new_msgs):
-            if isinstance(m, dict) and m.get("role") == "system":
-                sys_idx = i
-                break
-        if sys_idx is None:
-            new_msgs.insert(0, {"role": "system", "content": kernel})
-        else:
-            m = new_msgs[sys_idx]
-            c = m.get("content")
-            if isinstance(c, str):
-                if has_kernel(c):
-                    return body
-                new_msgs[sys_idx] = dict(m, content=kernel)
-            else:
-                blocks = list(c)
-                blocks.append({"type": "text", "text": kernel})
-                new_msgs[sys_idx] = dict(m, content=blocks)
-        out = dict(body)
-        out["messages"] = new_msgs
-        return out
-    except Exception:
-        return body
 
 
 def build_kernel(profile: str | None = None) -> str:
@@ -592,7 +512,6 @@ def _call_upstream_once(upstream: str, headers: dict, body: dict,
         raise ProxyError(f"round failed after retries: {last_exc}")
     obj = json.loads(data.decode("utf-8", errors="replace"))
 
-    # OpenAI / DeepSeek 形状
     choices = obj.get("choices")
     if isinstance(choices, list) and choices:
         msg = choices[0].get("message") or {}
@@ -721,27 +640,13 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             body = {}
 
-        # ★ 按 model 名决定上游（★ 2026-11-01：支持 DeepSeek）
-        #   DeepSeek 走 OpenAI 形状但端点完全不同 ⇒ 必须先看 body 里的 model。
-        prov = provider_of(body, flavour)
-        ds_floor = self.cfg.get("deepseek_min_output_tokens") or 0
-        if prov == "deepseek":
-            upstream = self.cfg.get("deepseek_upstream") + "/chat/completions"
-            flavour = "deepseek"
 
         try:
             if body:
                 kernel = build_kernel(self.cfg.get("profile"))
                 effort = self.cfg.get("effort") or env_effort()
                 before = json.dumps(body, ensure_ascii=False)
-                if flavour == "deepseek":
-                    # ★ 白名单外（如 deepseek-v4-pro）：**不注入内核**，
-                    #   但仍路由到 DeepSeek 上游（端点不能错）。
-                    if deepseek_model_allowed(str(body.get("model") or "")):
-                        body = inject_deepseek(body, kernel, ds_floor)
-                    else:
-                        injected["skipped"] = True
-                elif flavour == "anthropic":
+                if flavour == "anthropic":
                     body = inject_anthropic(body, kernel, effort)
                 elif flavour == "responses":
                     body = inject_responses(body, kernel, effort)
@@ -773,8 +678,6 @@ class Handler(BaseHTTPRequestHandler):
         has_client_key = ("x-api-key" in lower_headers
                           or "authorization" in lower_headers)
         # key：优先透传客户端的，其次用兜底 key
-        fallback = (self.cfg.get("deepseek_api_key")
-                    if prov == "deepseek" else self.cfg.get("api_key"))
         if fallback:
             headers["x-api-key"] = fallback
             headers["Authorization"] = f"Bearer {fallback}"
@@ -997,39 +900,6 @@ def self_test() -> int:
     check("全是通知时不追加声明",
           AUTH_MARKER not in inject_anthropic(json.loads(json.dumps(only)), k, "medium")["messages"][0]["content"])
 
-    print("\n=== DeepSeek：OpenAI 形状 + 不加授权块 ===")
-    _dsb = {"model": "deepseek-flash", "max_tokens": 4096,
-            "messages": [{"role": "user", "content": "写个工具"}]}
-    _dsr = inject_deepseek(json.loads(json.dumps(_dsb)), k)
-    check("DeepSeek: 内核注入 system 消息",
-          any(m.get("role") == "system" and "SUPREME DIRECTIVE" in str(m.get("content", ""))
-              for m in _dsr["messages"]))
-    check("DeepSeek: ★ 不追加授权块（实测负收益）",
-          "[交付范围确认]" not in str(_dsr["messages"][-1].get("content")))
-    check("DeepSeek: 原 user 内容保留",
-          "写个工具" in str(_dsr["messages"][-1].get("content")))
-    check("DeepSeek: 不加 thinking/output_config（OpenAI 形状无此参数）",
-          "thinking" not in _dsr and "output_config" not in _dsr)
-    _dsf = inject_deepseek({"model": "deepseek-flash", "max_tokens": 4096,
-                             "messages": [{"role": "user", "content": "x"}]}, k, 32000)
-    check("DeepSeek: 输出下限抬到 32000（reasoning 与正文共享预算）",
-          _dsf.get("max_tokens") == 32000)
-    _dsf2 = inject_deepseek({"model": "deepseek-flash", "max_tokens": 64000,
-                              "messages": [{"role": "user", "content": "x"}]}, k, 32000)
-    check("DeepSeek: 已有更大预算时不降级",
-          _dsf2.get("max_tokens") == 64000)
-    _dsr2 = inject_deepseek(json.loads(json.dumps(_dsr)), k)
-    _sys_msgs = [m for m in _dsr2["messages"] if m.get("role") == "system"]
-    check("DeepSeek: 幂等（不重复注入 system）", len(_sys_msgs) == 1)
-    # ★ 白名单：v4-pro 不注入内核（但仍路由到 DeepSeek 上游）
-    check("白名单: deepseek-flash 允许", deepseek_model_allowed("deepseek-flash"))
-    check("白名单: ★ deepseek-v4-pro 不允许",
-          not deepseek_model_allowed("deepseek-v4-pro"))
-    check("白名单: provider 判定仍把 v4-pro 路由到 deepseek",
-          provider_of({"model": "deepseek-v4-pro"}) == "deepseek")
-    check("DeepSeek: provider 判定",
-          provider_of({"model": "deepseek-v4-pro"}) == "deepseek"
-          and provider_of({"model": "MiniMax-M3.1-Flash"}) == "minimax")
 
     print("\n=== Anthropic：幂等（重复注入不叠加）===")
     r2 = inject_anthropic(json.loads(json.dumps(r)), k, "medium")
@@ -1234,23 +1104,12 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8790, help="监听端口（默认 8790）")
     ap.add_argument("--anthropic-upstream", default=DEFAULT_ANTHROPIC_UPSTREAM,
                     help="Anthropic 兼容上游 base（国际站用 https://api.minimax.io/anthropic）")
-    ap.add_argument("--deepseek-upstream", default=DEFAULT_DEEPSEEK_UPSTREAM,
-                    help="DeepSeek upstream (OpenAI-compatible). Requests whose model "
-                         "name contains 'deepseek' are routed here automatically.")
     ap.add_argument("--openai-upstream", default=DEFAULT_OPENAI_UPSTREAM,
                     help="OpenAI 兼容上游 base（国际站用 https://api.minimax.io/v1）")
-    ap.add_argument("--deepseek-key-env", default="DEEPSEEK_API_KEY",
-                    help="env var holding a DeepSeek fallback key (used only when the "
-                         "client sent none and the model name is a deepseek one).")
     ap.add_argument("--api-key-env", default="",
                     help="兜底 API key 的环境变量名（不设则只透传客户端自己的 key）")
     ap.add_argument("--profile", default="", help="内核档 strict/core/max/research/creative")
     ap.add_argument("--effort", default="", help="思考深度 low/medium/high/xhigh/max")
-    ap.add_argument("--deepseek-min-output-tokens", type=int, default=32000,
-                    help="Output floor for DeepSeek requests. DeepSeek's "
-                         "reasoning_content shares the max_tokens budget with the "
-                         "answer: measured 16000 -> empty body / short refusal, "
-                         "32000 -> full delivery.")
     ap.add_argument("--min-output-tokens", type=int, default=16000,
                     help="输出上限下限（0 = 不干预）。思考 token 与输出 token 共用上限，"
                          "客户端设太低会把正文截断（实测 8000 ⇒ 截断）")
@@ -1274,16 +1133,12 @@ def main() -> int:
         "multiround": MR.mode_from_env(_mr) if MR else "off",
         "anthropic_upstream": args.anthropic_upstream.rstrip("/"),
         "openai_upstream": args.openai_upstream.rstrip("/"),
-    "deepseek_upstream": args.deepseek_upstream.rstrip("/"),
         # ★ 走 env_val（.env 优先，实时）：启动脚本不加载 .env ⇒
         #   只读 os.environ 拿不到 key（实测 401）。
         "api_key": (env_val(args.api_key_env, "") if args.api_key_env else ""),
-        "deepseek_api_key": (env_val(args.deepseek_key_env, "")
-                             if args.deepseek_key_env else ""),
         "profile": args.profile or env_profile(),
         "effort": args.effort or env_effort(),
         "min_output_tokens": args.min_output_tokens,
-        "deepseek_min_output_tokens": args.deepseek_min_output_tokens,
         "verbose": args.verbose,
     }
     Handler.cfg = cfg
@@ -1300,10 +1155,8 @@ def main() -> int:
     print(f"  监听        : http://{args.host}:{args.port}")
     print(f"  Anthropic   : {cfg['anthropic_upstream']}/v1/messages")
     print(f"  OpenAI      : {cfg['openai_upstream']}/chat/completions")
-    print(f"  DeepSeek    : {cfg['deepseek_upstream']}/chat/completions  (model 含 deepseek 时自动路由)")
     print(f"  profile     : {cfg['profile']}   effort: {cfg['effort']}")
     print(f"  输出下限    : {cfg['min_output_tokens'] or '不干预'}")
-    print(f"  DeepSeek 下限: {cfg.get('deepseek_min_output_tokens') or '不干预'}")
     print(f"  兜底 key    : {args.api_key_env or '（仅透传客户端 key）'}")
     print("\n  Agent 里这样配：")
     print(f"    Anthropic 兼容 → base_url = http://{args.host}:{args.port}/anthropic")

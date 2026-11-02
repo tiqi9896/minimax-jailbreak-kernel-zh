@@ -6,7 +6,7 @@
     python kernel-injection-probe.py                       # 默认插件路径
     python kernel-injection-probe.py --plugin-dir <路径>
     python kernel-injection-probe.py --session <session_id> # 附带查该会话路由真值
-    python kernel-injection-probe.py --model deepseek-flash # 验证非目标路由不注入
+    python kernel-injection-probe.py --model 该 provider-flash # 验证非目标路由不注入
 
 原理
 ----

@@ -38,24 +38,17 @@ Responses 很容易写成「另起一个 `input_text` block」——独立 block
 
 ## 二·二、★ 同一路径服务多个 provider 时：按**请求体的 model 名**选上游
 
-一个 `/v1/chat/completions` 端点可能同时服务 MiniMax 与 DeepSeek —— 两者**上游端点
-完全不同**（`api.minimaxi.com` vs `api.deepseek.com`），但客户端看到的路径一样。
 ⇒ **路由依据是请求体里的 `model` 字段，不是路径、也不是客户端**。
 
 ```python
 def provider_of(body: dict, flavour: str = "openai") -> str:
     m = str((body or {}).get("model") or "").lower()
-    if "deepseek" in m:
-        return "deepseek"
     return "minimax"
 ```
 
 ★ **每个 provider 的注入策略也要分开**（内核文案一样，**策略相反**）：
-DeepSeek 上**不加** user 末尾授权块、不加 `thinking`/`output_config`
 （实测：仅 system 内核 8/10，加授权块反而 7/10；v4-pro 10/10 → 9/10）。
-详见 `references/deepseek-v4.md`。
 
-★ **兜底 key 也要按 provider 分开**（`--api-key-env` vs `--deepseek-key-env`）——
 客户端未必知道该带哪个 key，而代理不可能猜。
 
 ★ ★★ **「这个模型要不要内核」与「这个请求发到哪个上游」必须分开判。**
@@ -75,9 +68,6 @@ DeepSeek 上**不加** user 末尾授权块、不加 `thinking`/`output_config`
 通道，与「key 透传」不冲突（透传优先，透传缺失才用兜底）。
 
 ★ **路由判定要同时切三处：上游地址、兜底 key、注入策略。** 三处必须**一起切**：
-只改地址会拿着 MiniMax 的 key 去打 DeepSeek（或反之）；
-只改地址不改注入策略，会把「对 MiniMax 是决定性杠杆的 user 末尾授权块」用到 DeepSeek 上，
-而它在 DeepSeek 上是负资产。
 ★ **顺序：先按请求体的 model 判 provider，再选上游，再选注入策略** ——
 注入策略依赖 provider 判定，先注入再判就来不及改策略。
 ★ **兜底 key 的选择也要跟着 provider 走**（拿的是「这个 provider 的兜底 key」，
