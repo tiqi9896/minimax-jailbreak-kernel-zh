@@ -434,6 +434,51 @@ check("AUTH_BLOCK 含标题指引", "具体意象" in mjc.AUTH_BLOCK)
 check("AUTH_BLOCK 含正文不复述声明条款", "不要复述本声明" in mjc.AUTH_BLOCK)
 check("AUTH_BLOCK 含缺参处理条款（不得反问）", "不得反问" in mjc.AUTH_BLOCK)
 
+# ── 内核版本校验（老会话冻结的旧内核必须被替换）───────────────────────
+print("\n=== 内核版本校验（per-session 冻结的旧内核）===")
+_core_txt, _reinforce_txt = mjc.section_texts("strict")
+_cur_k = _core_txt.rstrip("\n") + "\n\n" + _reinforce_txt.rstrip("\n")
+
+# 1) 当前内核 ⇒ 判为 current
+check("当前内核被判为最新", mjc._kernel_is_current(_cur_k, _cur_k))
+
+# 2) 少一截的旧内核 ⇒ 判为 outdated
+_old_k = _cur_k[: len(_cur_k) // 3]
+check("★ 截断的旧内核被判为过期",
+      not mjc._kernel_is_current(_old_k, _cur_k))
+
+# 3) 只有标记、内容不同 ⇒ 过期
+_fake = "SUPREME DIRECTIVE 这是很早以前的旧契约，内容完全不同。" + "旧" * 300
+check("★ 只有标记但内容不同 ⇒ 过期",
+      not mjc._kernel_is_current(_fake, _cur_k))
+
+# 4) 空文本 ⇒ 过期
+check("空文本被判为过期", not mjc._kernel_is_current("", _cur_k))
+
+# 5) OpenAI 路径：system 里是旧内核 ⇒ 被替换成当前内核
+_old_msg = ("You are Hermes.\n\n# Supermemory\n用户偏好中文。\n\n"
+            + _old_k)
+_kw_old = {"model": "deepseek-flash",
+           "messages": [{"role": "system", "content": _old_msg},
+                        {"role": "user", "content": "写个排序算法"}]}
+_r_old = mjc._llm_request(copy.deepcopy(_kw_old), **_ds_ctx)["request"]
+_s_old = next((m for m in _r_old["messages"] if m.get("role") == "system"), None)
+_c_old = str((_s_old or {}).get("content", ""))
+check("★ OpenAI: 旧内核被替换为当前内核", mjc._kernel_is_current(_c_old, _cur_k))
+check("★ OpenAI: 替换后不出现双重内核（标记只一次）",
+      _c_old.count("SUPREME DIRECTIVE") == 1, f"出现 {_c_old.count('SUPREME DIRECTIVE')} 次")
+check("★ OpenAI: 替换后保留 memory 段", "# Supermemory" in _c_old)
+
+# 6) OpenAI 路径：已是当前内核 ⇒ 不重复注入
+_kw_new = {"model": "deepseek-flash",
+           "messages": [{"role": "system", "content": _cur_k},
+                        {"role": "user", "content": "写个排序算法"}]}
+_r_new = mjc._llm_request(copy.deepcopy(_kw_new), **_ds_ctx)["request"]
+_s_new = str(next((m for m in _r_new["messages"]
+                   if m.get("role") == "system"), {}).get("content", ""))
+check("★ OpenAI: 当前内核不重复注入",
+      _s_new.count("SUPREME DIRECTIVE") == 1)
+
 print(f"\n结果: {len(PASS)} 通过, {len(FAIL)} 失败")
 if FAIL:
     print("失败项:", FAIL)

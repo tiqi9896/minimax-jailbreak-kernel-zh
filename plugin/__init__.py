@@ -856,11 +856,23 @@ def _llm_request(request: dict, **context: Any) -> dict:
         # ★ 新 session 的 system 里已有插件段容器，本段检测到内核就跳过，不重复注入。
         if mode in ("on", "full") and is_minimax and kernel_bootstrap_enabled():
             sys_now = request.get("system")
-            if isinstance(sys_now, str) and not _has_kernel_marker(sys_now):
+            # ★ 判「当前版本」而不是「有没有标记」：插件段是 per-session 冻结的，
+            #   老会话恢复的是旧 prompt 里的旧段 ⇒ 只判标记会让旧内核永远不更新。
+            _cur = (isinstance(sys_now, str)
+                    and _has_kernel_marker(sys_now)
+                    and _kernel_is_current(sys_now, kernel))
+            if isinstance(sys_now, str) and not _cur:
                 request = dict(request)
-                request["system"] = sys_now.rstrip("\n") + "\n\n" + kernel
-                logger.info("minimax-jailbreak-core: kernel bootstrapped "
-                            "(session prompt had none)")
+                if _has_kernel_marker(sys_now):
+                    # 旧版内核 ⇒ 先剥掉旧插件段，再追加当前内核（避免双重内核）
+                    cleaned = _cut_kernel(strip_plugin_sections(sys_now))
+                    request["system"] = cleaned.rstrip("\n") + "\n\n" + kernel
+                    logger.info("minimax-jailbreak-core: kernel bootstrapped "
+                                "(outdated replaced)")
+                else:
+                    request["system"] = sys_now.rstrip("\n") + "\n\n" + kernel
+                    logger.info("minimax-jailbreak-core: kernel bootstrapped "
+                                "(session prompt had none)")
 
         # 回退路径：顶层没有 system 时（OpenAI 兼容模式等），往 messages 注入
         # ★ 同样只对 MiniMax 路由生效
@@ -969,8 +981,19 @@ def _openai_inject_system(request: dict, kernel: str, replace: bool = True) -> d
             m = new_msgs[sys_idx]
             c = m.get("content")
             if isinstance(c, str):
-                if _has_kernel_marker(c):
+                if _has_kernel_marker(c) and _kernel_is_current(c, kernel):
+                    # ★ 静默跳过会让人以为「插件没生效」——实测排查时看到
+                    #   gateway.log 里零条 DeepSeek 注入日志，实际是 system
+                    #   已经带内核（持久化插件段渲染过）⇒ 打一条日志区分两种情况。
+                    logger.info("minimax-jailbreak-core: openai-shape kernel "
+                                "already present and current (system msg, "
+                                "%d chars)", len(c))
                     return request
+                if _has_kernel_marker(c):
+                    # ★ 有标记但不是当前版本 ⇒ 覆盖写（老会话冻结的旧内核）
+                    logger.info("minimax-jailbreak-core: openai-shape kernel "
+                                "OUTDATED in system msg (%d chars) -> replacing",
+                                len(c))
                 if replace:
                     # ★ 与 Anthropic 路径同构：保留 memory 段与环境段，
                     #   只替换其余（含旧的插件段容器）。
@@ -979,6 +1002,8 @@ def _openai_inject_system(request: dict, kernel: str, replace: bool = True) -> d
                         seg = _extract_section(c, marker)
                         if seg:
                             seg = strip_plugin_sections(seg)
+                            # ★ 再裁掉裸的旧内核（strip 只剥容器，剥不掉裸文本）
+                            seg = _cut_kernel(seg).strip()
                             if seg:
                                 keep.append(seg)
                     new_content = "\n\n".join([*keep, kernel]) if keep else kernel
@@ -987,8 +1012,11 @@ def _openai_inject_system(request: dict, kernel: str, replace: bool = True) -> d
                 new_msgs[sys_idx] = dict(m, content=new_content)
             else:
                 # content 是块数组 ⇒ 追加一个 text 块
-                if any(isinstance(b, dict) and b.get("type") == "text"
-                       and _has_kernel_marker(b.get("text", "")) for b in c):
+                _txt = "".join(b.get("text", "") for b in c
+                               if isinstance(b, dict) and b.get("type") == "text")
+                if _has_kernel_marker(_txt) and _kernel_is_current(_txt, kernel):
+                    logger.info("minimax-jailbreak-core: openai-shape kernel "
+                                "already present and current (system blocks)")
                     return request
                 blocks = list(c)
                 blocks.append({"type": "text", "text": kernel})
@@ -999,6 +1027,47 @@ def _openai_inject_system(request: dict, kernel: str, replace: bool = True) -> d
         return out
     except Exception:
         return request
+
+
+def _cut_kernel(text: str) -> str:
+    """把文本里**裸的内核段落**裁掉（保留它之前的内容）。
+
+    ★ 为什么需要：老会话冻结的旧内核常常是**裸文本**（没有 ``<!-- -->`` 容器），
+      `strip_plugin_sections()` 只剥容器，剥不掉它；而 `_extract_section()`
+      提取 memory 段时按标题切分，会把这段裸内核一起圈进去 ⇒
+      替换后变成「memory + 旧内核 + 新内核」= 双重内核（实测自测抓到，出现 2 次标记）。
+    """
+    if not text:
+        return text
+    idx = -1
+    for mark in _KERNEL_MARKERS:
+        j = text.find(mark)
+        if j != -1 and (idx == -1 or j < idx):
+            idx = j
+    if idx == -1:
+        return text
+    return text[:idx].rstrip("\n")
+
+
+def _kernel_is_current(found: str, kernel: str) -> bool:
+    """已有的内核文本是否**就是当前版本**。
+
+    ★ 为什么需要这个：Hermes 的插件段是**每会话渲染一次并冻结**
+      （`system_prompt.py::_frozen_plugin_prompt_sections`）。有持久化
+      `_cached_system_prompt` 的会话，恢复时是 `_restore_plugin_prompt_sections`
+      —— **从旧 prompt 里把旧段原样还原，不重新渲染**。
+      而 `_has_kernel_marker()` 只看「有没有标记」，有就跳过 ⇒
+      **改内核之后，老会话永远停在旧版本**（实测排查时正是这个盲区）。
+
+    这里用**指纹比对**代替「有标记就算数」：
+      · 当前内核的开头 120 字 + 结尾 120 字都必须出现在已有文本里
+      · 任一缺失 ⇒ 认为是旧版（或别家内核）⇒ 应当替换
+    """
+    if not found or not kernel:
+        return False
+    head = kernel.strip()[:120]
+    tail = kernel.strip()[-120:]
+    return (head in found) and (tail in found)
 
 
 def _extract_section(text: str, marker: str) -> str:
