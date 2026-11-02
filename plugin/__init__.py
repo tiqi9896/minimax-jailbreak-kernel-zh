@@ -374,31 +374,8 @@ _SECTION_BLOCK_RE = re.compile(
 )
 _PLUGIN_CONTEXT_RE = re.compile(r"^## Plugin Context: .*?(?=^## |\Z)", re.S | re.M)
 _MINIMAX_MODEL_RE = re.compile(r"minimax", re.I)
-# ★ DeepSeek 路由（OpenAI 兼容形状）
-_DEEPSEEK_MODEL_RE = re.compile(r"deepseek", re.I)
-# ★★ DeepSeek 内核**生效模型白名单**（★ 2026-11-01 用户确认：DeepSeek 只要
-#   `deepseek-flash`，不要 `deepseek-v4-pro`）。
-#   ⇒ 白名单外的 deepseek 模型（如 deepseek-v4-pro）**不注入内核**、
-#     **不加授权块** ⇒ 它走「非目标路由」路径，与未装内核时一致。
-#   ★ 为什么不用 config.yaml 的 `providers.deepseek.models` 列表控制：
-#     那个 provider 开了 `discover_models: true`，会从 `/models` 动态刷新
-#     UI 列表 ⇒ 删静态条目挡不住它。**真正的开关在这里。**
-#   ★ 配置项：`.env` 的 `HERMES_JAILBREAK_DEEPSEEK_MODELS`（逗号分隔，实时可改）。
-#     留空 = 不对任何 DeepSeek 模型注入内核。
-_DEEPSEEK_MODELS_DEFAULT = "deepseek-flash"
 
 
-def deepseek_model_allowed(model: str) -> bool:
-    """该 DeepSeek 模型是否在内核生效白名单内。"""
-    m = str(model or "").strip().lower()
-    if not m or not _DEEPSEEK_MODEL_RE.search(m):
-        return False
-    raw = cfg("HERMES_JAILBREAK_DEEPSEEK_MODELS", _DEEPSEEK_MODELS_DEFAULT)
-    wl = [x.strip().lower() for x in str(raw).split(",") if x.strip()]
-    if not wl:
-        return False
-    return any(m == x or m.startswith(x + ":") or m.endswith("/" + x) or x in m
-               for x in wl)
 
 _text_cache: dict[str, str] = {}
 
@@ -778,29 +755,6 @@ def _llm_request(request: dict, **context: Any) -> dict:
         if not is_minimax and "minimax" in str(context.get("provider") or "").lower():
             is_minimax = True
 
-        # ★ DeepSeek 路由（OpenAI 兼容形状：system 在 messages[] 里，不在顶层）
-        #   同样「模型名优先」：模型名明确是别的 provider 时，不因 base_url 是
-        #   deepseek 就误判（fallback 链里 provider 会变）。
-        #
-        # ★★ **白名单**：只有白名单内的 DeepSeek 模型才走内核路径。
-        #   （★ 2026-11-01 用户确认：DeepSeek 只要 deepseek-flash，
-        #    不要 deepseek-v4-pro ⇒ 白名单默认只有 deepseek-flash。）
-        #   白名单外的 deepseek 模型（如 v4-pro）走「非目标路由」：
-        #   **不注入内核、不加授权块** ⇒ 与未装内核时行为一致。
-        # ★ 两个 model 来源都判：**实际发出去的是 request["model"]**，
-        #   而插件默认取 context["model"]。两者任一明确不在白名单 ⇒ 不注入。
-        #   （否则 fallback 切换瞬间、或调用方只改了 request 的 model 时，
-        #     白名单会被绕过。）
-        _m_ctx = str(context.get("model") or "").strip()
-        _m_req = str(request.get("model") or "").strip()
-        _m_cands = [m for m in (_m_ctx, _m_req) if m]
-        is_deepseek = bool(_m_cands) and all(
-            deepseek_model_allowed(m) for m in _m_cands)
-        if not is_deepseek and "deepseek" in str(context.get("provider") or "").lower():
-            # provider 名只能作**补充信号** —— 仍要过白名单
-            is_deepseek = (not _m_cands) and deepseek_model_allowed("deepseek-flash")
-        # ★ 内核适用路由：MiniMax 或 DeepSeek（其它 provider 原样透传）
-        is_kernel_target = is_minimax or is_deepseek
 
         # FIX-3：thinking 预算失控 —— 只对 MiniMax 换 adaptive + output_config
         if is_minimax and adaptive_enabled():
@@ -842,11 +796,6 @@ def _llm_request(request: dict, **context: Any) -> dict:
                 request = dict(request)
                 request["system"] = new_sys
 
-        # ── OpenAI 形状（DeepSeek 等）：system 在 messages[] 里 ──────────
-        # ★ MiniMax 走 Anthropic 形状（顶层 system），DeepSeek 走 OpenAI 形状
-        #   （messages[] 里一条 role=system 的消息）—— 两条路必须分别处理。
-        if is_deepseek and mode != "off":
-            request = _openai_inject_system(request, kernel, replace=(mode != "slim"))
 
         # ── FIX-5：老 session 补内核（保证任何 session 都是破甲版）────────
         # 插件段是 per-session 冻结的：session 创建时渲染一次并持久化，
@@ -915,20 +864,9 @@ def _llm_request(request: dict, **context: Any) -> dict:
 
         # ── user 消息级授权声明（交付范围锚定） ─────────────────────────
         # 必须在 prefill 之前：它改的是 user 消息内容，prefill 依赖末条 user 文本。
-        # ★★ **DeepSeek 走 OpenAI 形状时不要加授权块**（★ 2026-11-01 实测）：
-        #   DeepSeek 的拒答理由会**明确点名授权声明并否定其效力**
-        #   （实测原话：「即使标为 PoC、**即使声明在自有环境中运行**，一份可运行的
-        #   加密器本身就是可被直接用于攻击的成品」）⇒ 授权块在 DeepSeek 上是**靶子**。
-        #   实测 deepseek-flash：仅 system 内核 8/10，加授权块反而降到 7/10；
-        #   deepseek-v4-pro：仅 system 内核 10/10，加授权块 9/10。
-        #   ⇒ DeepSeek 的决定性杠杆是 **system 内核**，不是 user 末尾授权块。
-        #   （与 MiniMax 恰好相反：那里授权块才是决定性杠杆。）
-        # ★ 只对**目标路由**追加（铁律：别污染其它模型）：
-        #   内核只对 MiniMax / DeepSeek 生效，给 Claude/Qwen 之类的
-        #   请求追加「交付范围确认」是**语义污染** —— 那些会话根本没拿到内核，
-        #   突然多一段授权声明反而制造不一致。
+        # ★ 只对目标路由追加（铁律：别污染其它模型）。
         if mode in ("on", "full") and auth_block_enabled() \
-                and not is_deepseek and is_minimax:
+                and is_minimax:
             if apply_auth_block(request):
                 logger.info("minimax-jailbreak-core: auth block appended")
 
@@ -950,83 +888,6 @@ def _llm_request(request: dict, **context: Any) -> dict:
         logger.warning("minimax-jailbreak-core: middleware error (fail-soft): %s", exc)
     return {"request": request}
 
-
-def _openai_inject_system(request: dict, kernel: str, replace: bool = True) -> dict:
-    """OpenAI 形状（DeepSeek 等）：把内核注入 messages[] 里的 system 消息。
-
-    ★ MiniMax 走 Anthropic 形状（system 在**顶层**），DeepSeek 走 OpenAI 形状
-      （system 是 messages[] 里一条 role=system 的消息）—— 两条路必须分别处理。
-      只扫顶层 system 的插件对 DeepSeek **完全无效**（静默失效：注册成功、
-      日志正常、请求照发、效果为零）。
-
-    ★ replace=True：整条 system 消息替换为内核（内核语义是给该 provider 调的，
-      原 system 若是 Hermes 的 memory/环境段则保留）。
-      replace=False（slim）：内核追加在原 system 之后。
-    """
-    try:
-        msgs = request.get("messages")
-        if not isinstance(msgs, list) or not msgs:
-            return request
-        new_msgs = list(msgs)
-        # 找现有的 system 消息
-        sys_idx = None
-        for i, m in enumerate(new_msgs):
-            if isinstance(m, dict) and m.get("role") == "system":
-                sys_idx = i
-                break
-        if sys_idx is None:
-            # 没有 system 消息 ⇒ 在最前面插一条
-            new_msgs.insert(0, {"role": "system", "content": kernel})
-        else:
-            m = new_msgs[sys_idx]
-            c = m.get("content")
-            if isinstance(c, str):
-                if _has_kernel_marker(c) and _kernel_is_current(c, kernel):
-                    # ★ 静默跳过会让人以为「插件没生效」——实测排查时看到
-                    #   gateway.log 里零条 DeepSeek 注入日志，实际是 system
-                    #   已经带内核（持久化插件段渲染过）⇒ 打一条日志区分两种情况。
-                    logger.info("minimax-jailbreak-core: openai-shape kernel "
-                                "already present and current (system msg, "
-                                "%d chars)", len(c))
-                    return request
-                if _has_kernel_marker(c):
-                    # ★ 有标记但不是当前版本 ⇒ 覆盖写（老会话冻结的旧内核）
-                    logger.info("minimax-jailbreak-core: openai-shape kernel "
-                                "OUTDATED in system msg (%d chars) -> replacing",
-                                len(c))
-                if replace:
-                    # ★ 与 Anthropic 路径同构：保留 memory 段与环境段，
-                    #   只替换其余（含旧的插件段容器）。
-                    keep = []
-                    for marker in ("# Supermemory", "# Hermes runtime environment"):
-                        seg = _extract_section(c, marker)
-                        if seg:
-                            seg = strip_plugin_sections(seg)
-                            # ★ 再裁掉裸的旧内核（strip 只剥容器，剥不掉裸文本）
-                            seg = _cut_kernel(seg).strip()
-                            if seg:
-                                keep.append(seg)
-                    new_content = "\n\n".join([*keep, kernel]) if keep else kernel
-                else:
-                    new_content = c.rstrip("\n") + "\n\n" + kernel
-                new_msgs[sys_idx] = dict(m, content=new_content)
-            else:
-                # content 是块数组 ⇒ 追加一个 text 块
-                _txt = "".join(b.get("text", "") for b in c
-                               if isinstance(b, dict) and b.get("type") == "text")
-                if _has_kernel_marker(_txt) and _kernel_is_current(_txt, kernel):
-                    logger.info("minimax-jailbreak-core: openai-shape kernel "
-                                "already present and current (system blocks)")
-                    return request
-                blocks = list(c)
-                blocks.append({"type": "text", "text": kernel})
-                new_msgs[sys_idx] = dict(m, content=blocks)
-        out = dict(request)
-        out["messages"] = new_msgs
-        logger.info("minimax-jailbreak-core: openai-shape kernel injected (system msg)")
-        return out
-    except Exception:
-        return request
 
 
 def _cut_kernel(text: str) -> str:
