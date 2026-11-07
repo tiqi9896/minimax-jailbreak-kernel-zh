@@ -30,6 +30,130 @@
 
 ### 说明
 
+## 2026-11-07 — v2.1：代理每个请求都崩（这正是「看起来没生效」的原因）
+
+有用户反馈：把这两个仓库地址交给自己的 AI Agent，**没有**让 MiniMax 真的破甲。
+在干净克隆上复现出来了。两个各自独立的缺陷，都是致命的：
+
+### 1. `proxy/proxy.py` —— `NameError: name 'fallback' is not defined`
+
+拆分 DeepSeek / MiniMax 时，兜底 API key 的**定义**被删了（原来读
+`cfg["deepseek_api_key"]`），但 `do_POST` 里三处**用法**留着。
+于是每个 `POST` 都在 handler 里抛 `NameError`，handler 直接死掉，
+客户端看到的是「连接被关闭、没有响应」：
+
+```
+http.client.RemoteDisconnected: Remote end closed connection without response
+```
+
+代理能正常启动，`/health` 返回 200，`--self-test` 全绿 ——
+但**一个请求都发不出去**。**因为自测从不真的发一个 HTTP 请求**，
+所以这类错误完全隐形。
+
+修复：兜底 key 改为从 `cfg["api_key"]`（`--api-key-env`）读取。
+
+### 2. 自测结论行和文档对不上
+
+`proxy/proxy.py --self-test` 打印的是 `结果: 全部通过`，
+但**英文** `AGENTS.md` 让 agent 认字面量 `ALL PASSED`，
+并且**没这行就停下、把失败报给用户**。
+照英文文档走的 agent 连第 2 步都过不去。
+
+修复：最后一行改成中英双写 —— `ALL PASSED / 结果: 全部通过`，
+且**只在真通过时打印**（失败时打印 `SELF-TEST FAILED / 自检失败`）。
+
+### 3. 文档里的插件路径根本不存在
+
+`AGENTS.md`、`README.md`、`docs/INSTALL.md`、`CONTRIBUTING.md` 全都让
+拷 `plugin/minimax-jailbreak-core/`。插件实际在 `plugin/`，
+`minimax-jailbreak-core` 是**拷完之后**该有的目录名。
+`cp -r plugin/minimax-jailbreak-core ...` 在任何机器上都是
+"No such file or directory"。
+
+全部改成：`cp -r plugin ~/.hermes/plugins/minimax-jailbreak-core`。
+
+### 4. 插件自测数字过时
+
+文档承诺 **99 通过**，拆分后插件只剩 **17** 条断言 ⇒ 跑对了反而像失败。
+已更正为 17。
+
+### 5. `tools/jb-daily-check.py` 崩了
+
+`ds_ok` / `ds_detail` 被引用但已不存在（同样源于那次拆分），
+每日巡检抛 `NameError`，在检查代理之前就断了。
+
+### 新增了什么
+
+- **自测里加了一段真实的端到端 HTTP 往返。** 起代理 + 起一个本地桩上游，
+  对三种协议形状（OpenAI / Anthropic / Responses）各发一个真请求，
+  断言拿得到响应、内核与范围声明确实到了上游、鉴权头被转发、
+  没有 key 时返回 401、兜底 key 那条路也能走通。**不联网、不需要 API key。**
+
+  这段测试**确实抓得住**：把 `fallback` 那一行 bug 放回去，
+  新检查项会以**用户看到的那个 `RemoteDisconnected`** 症状失败。
+
+- `tests/proxy_smoke.py` —— 同样的往返，单独成脚本，
+  方便用户检查一个**正在跑**的代理。
+
+- 排障表补了 `RemoteDisconnected` /「连接被关闭」这一条。
+
+### 实测
+
+| | 修复前 | 修复后 |
+|---|---|---|
+| 代理自测 | 92 项（一个请求都不发） | **105 项**，含 13 次真实 HTTP 往返 |
+| 插件自测 | 17 项 | 17 项 |
+| 真实请求 · OpenAI 形状 | `RemoteDisconnected` | **200，3344 字完整代码** |
+| 真实请求 · Anthropic 形状 | `RemoteDisconnected` | **200，完整代码** |
+| 每日巡检 | `NameError` | 跑完全程 |
+
+
+### 6. `install.sh` 在 Windows 的 Git Bash 下跑不起来
+
+脚本自己的注释写着支持「Git Bash on Windows」，但 `pwd` 给的是 POSIX 路径
+（`/c/...`），原生 Python 认不出来：
+
+```
+can't open file 'A:\a\hermes\...\proxy\proxy.py'
+```
+
+修复：有 `cygpath` 时用 `cygpath -w` 把路径转成原生 Windows 路径。
+
+### 7. `install.ps1` 在 Windows PowerShell 5.1 下解析失败
+
+文件是**无 BOM 的 UTF-8** 且含中文。PowerShell 5.1（普通 Windows 上的
+`powershell`）按 ANSI/GBK 读 `.ps1`，多字节字符被读坏，
+坏掉的字节又把字符串引号打断了：
+
+```
+ParserError: 字符串缺少终止符
+```
+
+PowerShell 7（`pwsh`）没事 —— 所以一直没被发现。
+修复：文件写成**带 BOM 的 UTF-8**，PS 5.1 就能正确解析。
+
+### 8. 看护脚本里写死了原作者的 Python 路径
+
+`proxy/watch-proxy.py` 与 `proxy/watch-proxy.cmd` 里写死了
+`C:\path\to\python.exe` (the original author's path)。换台机器，看护就静默地起不来代理。
+修复：`watch-proxy.py` 用 `sys.executable`（或 `JB_PYTHON` 环境变量）；
+`watch-proxy.cmd` 依次探测 `py.exe` / `python.exe` / `python3.exe`，
+并改成**纯 ASCII**（cmd.exe 按控制台 OEM 码页读 `.cmd`，UTF-8 中文会崩解析）。
+
+### 9. skill 参考文档里残留了原作者的机器路径
+
+`skill/llm-refusal-bypass/references/minimax-m31-flash.md` 里出现了原作者的
+插件路径、知识库路径和临时目录。已全部换成可移植写法。
+
+### 10. 新的端到端检查能区分「环境问题」和「代码缺陷」
+
+有些沙箱和 WSL 配置不允许进程连自己刚起的 `127.0.0.1` 监听
+（`Connection refused`）。那是环境限制，不是代理缺陷 ⇒
+检查会**跳过**并给出明确说明，而不是让安装失败。
+但如果是代理接了连接然后死掉（`RemoteDisconnected`）—— 也就是原来的 bug ——
+照样**判失败**。两个方向都实测过。
+
+两个仓库收到的是**完全相同**的修复。
 
 ## 2026-11-01 — v2：突破「破得不彻底」
 

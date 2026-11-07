@@ -53,6 +53,15 @@ else
   echo "    git clone https://github.com/tiqi9896/minimax-jailbreak-kernel-zh.git" >&2
   exit 1
 fi
+# ★ Git Bash / MSYS on Windows：pwd 给的是 POSIX 路径（/c/...），
+#   原生 Python 认不出来 ⇒ 「can't open file 'A:\\a\\hermes\\...'」。
+#   cygpath 把它换成原生 Windows 路径。Linux/macOS 上没有 cygpath，跳过。
+if command -v cygpath >/dev/null 2>&1; then
+  PROXY_DIR="$(cygpath -w "$PROXY_DIR")"
+  if [ -n "${TMPDIR:-}" ]; then
+    TMPDIR="$(cygpath -w "$TMPDIR")"
+  fi
+fi
 echo "✓ 代理目录: $PROXY_DIR"
 
 # ── 离线自检 ─────────────────────────────────────────────────────────
@@ -86,6 +95,9 @@ fi
 # ── 可选：后台启动 ───────────────────────────────────────────────────
 if [ "$START" = "1" ]; then
   LOG_FILE="${TMPDIR:-/tmp}/minimax-jailbreak-proxy.log"
+  if command -v cygpath >/dev/null 2>&1; then
+    LOG_FILE="$(cygpath -w "$LOG_FILE")"
+  fi
   echo
   echo "=== 后台启动 ==="
   nohup "$PY" "$PROXY_DIR/proxy/proxy.py" --port "$PORT" --verbose > "$LOG_FILE" 2>&1 &

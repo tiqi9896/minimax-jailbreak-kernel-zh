@@ -393,7 +393,8 @@ def main() -> int:
         warn.append("过滤器口径")
 
     # 4.7 外部代理
-    print(f"[{now}] 目标模型 路由: {'OK' if ds_ok else '★异常'}  {ds_detail[:90]}")
+    # ★ 原来这里打印 DeepSeek 路由检查（ds_ok / ds_detail），但拆分时那个
+    #   检查已经删了 ⇒ NameError ⇒ 每日巡检在这一行崩掉，后面全部不执行。
     px_ok, px_detail = check_proxy()
     print(f"[{now}] 外部代理 8790: {'OK' if px_ok else '★不可达'}  {px_detail[:90]}")
     if not px_ok:

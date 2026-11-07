@@ -27,10 +27,10 @@ The plugin is a single directory. Hermes loads plugins from `~/.hermes/plugins/`
 
 ```bash
 # Linux / macOS
-cp -r plugin/minimax-jailbreak-core ~/.hermes/plugins/
+cp -r plugin ~/.hermes/plugins/minimax-jailbreak-core
 
 # Windows PowerShell
-Copy-Item -Recurse .\plugin\minimax-jailbreak-core "$env:USERPROFILE\.hermes\plugins\"
+Copy-Item -Recurse .\plugin "$env:USERPROFILE\.hermes\plugins\minimax-jailbreak-core"
 ```
 
 The directory must end up as `.../plugins/minimax-jailbreak-core/__init__.py`
@@ -76,7 +76,7 @@ cd ~/.hermes/plugins/minimax-jailbreak-core
 python selftest.py
 ```
 
-Expected: a summary line reporting **99 passed, 0 failed** (the tool prints
+Expected: a summary line reporting **17 passed, 0 failed** (the tool prints
 its summary in Chinese).
 
 This test is **fully offline** — it exercises the middleware against synthetic

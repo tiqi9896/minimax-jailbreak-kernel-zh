@@ -3,6 +3,10 @@
 
 ★ 不用 .cmd：cmd 的 `start` 会让子进程继承句柄 ⇒ 调用方等它退出 ⇒ 超时。
   这里用 DETACHED_PROCESS 完全脱离。
+
+★ 解释器路径**不写死**：用当前解释器（sys.executable），
+  或环境变量 JB_PYTHON 指定的。写死某台机器的 Python 路径
+  ⇒ 换台机器看护就静默失效（进程根本起不来）。
 """
 import os
 import subprocess
@@ -11,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PY = r"C:\Python314\python.exe"
+PY = os.environ.get("JB_PYTHON") or sys.executable or "python"
 URL = "http://127.0.0.1:8790/health"
 
 

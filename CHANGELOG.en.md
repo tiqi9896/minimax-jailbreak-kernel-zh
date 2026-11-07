@@ -23,6 +23,137 @@
 
 ### Notes
 
+## 2026-11-07 — v2.1: the proxy crashed on every request (this made it look "not working")
+
+A user reported that handing these repository URLs to an AI agent did **not**
+produce a non-refusing MiniMax. Reproduced on a clean clone. Two independent
+defects, both fatal:
+
+### 1. `proxy/proxy.py` — `NameError: name 'fallback' is not defined`
+
+The DeepSeek/MiniMax split removed the **definition** of the fallback API key
+(it read `cfg["deepseek_api_key"]`) but left the three **usages** in
+`do_POST`. Every `POST` therefore raised `NameError` inside the handler, the
+handler died, and the client saw the connection closed with no response:
+
+```
+http.client.RemoteDisconnected: Remote end closed connection without response
+```
+
+The proxy started fine, `/health` returned 200, `--self-test` was green —
+and not one request could get through. **The self-test never issued a real
+HTTP request**, which is exactly why this shipped.
+
+Fixed: the fallback key is read from `cfg["api_key"]` (`--api-key-env`).
+
+### 2. The self-test result line did not match the docs
+
+`proxy/proxy.py --self-test` printed `结果: 全部通过`, but the **English**
+`AGENTS.md` told the agent to expect the literal `ALL PASSED` and to **stop**
+and report a failure if it was missing. An agent following the English docs
+never got past step 2.
+
+Fixed: the final line is now bilingual —
+`ALL PASSED / 结果: 全部通过` — and it is printed **only when the self-test
+actually passed** (a failure prints `SELF-TEST FAILED / 自检失败`).
+
+### 3. The plugin path in the docs did not exist
+
+`AGENTS.md`, `README.md`, `docs/INSTALL.md` and `CONTRIBUTING.md` all said to
+copy `plugin/minimax-jailbreak-core/`. The plugin lives at `plugin/`; the
+directory named `minimax-jailbreak-core` is what it must become **after** the
+copy. `cp -r plugin/minimax-jailbreak-core ...` failed with
+"No such file or directory" on every machine.
+
+Fixed everywhere: `cp -r plugin ~/.hermes/plugins/minimax-jailbreak-core`.
+
+### 4. The plugin self-test count was stale
+
+The docs promised **99 passed**; the split left the plugin with **17**
+assertions, so a correct run looked like a failure. Corrected to 17.
+
+### 5. `tools/jb-daily-check.py` crashed
+
+`ds_ok` / `ds_detail` were referenced but no longer defined (same split), so
+the daily health check raised `NameError` and stopped before the proxy check.
+
+### What was added
+
+- **A real end-to-end HTTP test inside `--self-test`.** It starts the proxy
+  and a local stub upstream, sends actual requests in all three protocol
+  shapes (OpenAI / Anthropic / Responses), and asserts a response comes back,
+  that the kernel and the scope statement reached the upstream, that the auth
+  headers were forwarded, that a missing key yields 401, and that the
+  fallback-key path works. No network, no API key.
+
+  Verified to have teeth: reintroducing the one-line `fallback` bug makes the
+  new checks fail with exactly the `RemoteDisconnected` symptom users saw.
+
+- `tests/proxy_smoke.py` — the same round trip as a standalone script, for
+  users who want to check a running proxy.
+
+- A troubleshooting row for `RemoteDisconnected` / "connection closed".
+
+### Measured
+
+| | before | after |
+|---|---|---|
+| proxy self-test | 92 checks (no request ever sent) | **105 checks**, incl. 13 real HTTP round trips |
+| plugin self-test | 17 checks | 17 checks |
+| live request, OpenAI shape | `RemoteDisconnected` | **200, 3344 chars of complete code** |
+| live request, Anthropic shape | `RemoteDisconnected` | **200, complete code** |
+| daily health check | `NameError` | runs to completion |
+
+
+### 6. `install.sh` could not run under Git Bash on Windows
+
+The script's own header claims "Git Bash on Windows" support, but `pwd` returns
+a POSIX path (`/c/...`) that native Python cannot open:
+
+```
+can't open file 'A:\a\hermes\...\proxy\proxy.py'
+```
+
+Fixed: the path is converted with `cygpath -w` when `cygpath` exists.
+
+### 7. `install.ps1` failed to parse under Windows PowerShell 5.1
+
+The file is UTF-8 **without a BOM** and contains Chinese text. PowerShell 5.1
+(the `powershell` on a normal Windows box) reads `.ps1` as ANSI/GBK, mangles
+the multi-byte characters, and the mangled bytes break the string quoting:
+
+```
+ParserError: 字符串缺少终止符
+```
+
+PowerShell 7 (`pwsh`) was fine — which is why this survived. Fixed by writing
+the file as UTF-8 **with BOM**, so PS 5.1 parses it correctly.
+
+### 8. The watchdog hard-coded the original author's Python path
+
+`proxy/watch-proxy.py` and `proxy/watch-proxy.cmd` contained
+`C:\path\to\python.exe` (the original author's path). On any other machine the watchdog silently failed
+to start the proxy. Fixed: `watch-proxy.py` uses `sys.executable` (or the
+`JB_PYTHON` environment variable); `watch-proxy.cmd` probes `py.exe` /
+`python.exe` / `python3.exe` and is now ASCII-only (cmd.exe reads `.cmd` in
+the console OEM codepage, where UTF-8 Chinese bytes break the parser).
+
+### 9. Author-machine paths left in the skill reference
+
+`skill/llm-refusal-bypass/references/minimax-m31-flash.md` referenced the
+original author's plugin path, knowledge-base path and scratch directory.
+Replaced with portable forms.
+
+### 10. The new end-to-end check distinguishes "environment" from "defect"
+
+Some sandboxes and WSL configurations forbid a process from connecting to a
+listener it started on `127.0.0.1` (`Connection refused`). That is an
+environment restriction, not a proxy defect, so the check **skips** with an
+explicit note instead of failing the install. It still **fails** when the
+proxy accepts the connection and then dies (`RemoteDisconnected`) — which is
+the original bug. Verified both ways.
+
+Both repositories received the identical fix.
 
 ## 2026-11-01 — v2: closing the remaining escape hatches
 

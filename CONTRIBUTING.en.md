@@ -53,11 +53,11 @@ crashes for every other user.
 
 ```bash
 # Copy the plugin somewhere with no sibling upstream plugin, then run the test:
-cp -r plugin/minimax-jailbreak-core /tmp/standalone/
-cd /tmp/standalone && python selftest.py
+cp -r plugin /tmp/standalone/minimax-jailbreak-core
+cd /tmp/standalone/minimax-jailbreak-core && python selftest.py
 ```
 
-Expected: a summary line reporting **99 passed, 0 failed** (the tool prints
+Expected: a summary line reporting **17 passed, 0 failed** (the tool prints
 its summary in Chinese).
 
 If that passes only on your machine and not in a clean directory, you have the
@@ -109,7 +109,7 @@ the default, say why in the commit message.
 
 ```bash
 # offline, no API key, no network
-cd plugin/minimax-jailbreak-core && python selftest.py
+cd plugin && python selftest.py
 ```
 
 The self-test exercises the middleware against synthetic request payloads:

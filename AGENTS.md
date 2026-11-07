@@ -21,7 +21,7 @@
 | 载体 | 什么时候用 |
 |---|---|
 | **`proxy/proxy.py`** | **默认选它。** 任何能设 `base_url` 的 agent 都能用，不需要 agent 侧插件。 |
-| `plugin/minimax-jailbreak-core/` | 用户跑的是 Hermes Agent，且想要原生路径（会话级开关）。 |
+| `plugin/` | 用户跑的是 Hermes Agent，且想要原生路径（会话级开关）。 |
 
 **几乎所有情况都该用代理。** 除非用户明确说他跑 Hermes Agent 且要插件，
 否则一律用代理。
@@ -41,13 +41,22 @@ cd minimax-jailbreak-kernel
 python proxy/proxy.py --self-test
 ```
 
-预期输出末尾是：
+预期输出**最后一行**是这个（中文和英文写在同一行）：
 
 ```
-结果: 全部通过
+ALL PASSED / 结果: 全部通过
 ```
 
-如果没这行，**把失败原文照报给用户并停下** —— 不要去「修」内核文案。
+两种语言写在同一行是故意的 —— 读中文文档的 agent 和读英文文档的 agent
+拿到的是同一个标记。
+
+如果这行没有（或者写的是 `SELF-TEST FAILED / 自检失败`），
+**把失败原文照报给用户并停下** —— 不要去「修」内核文案。
+
+> 自测里现在包含一次**真实的端到端 HTTP 往返**：起一个本地桩上游，
+> 对三种协议形状各发一个真请求，断言拿得到响应。
+> 这一段能抓住「代理能启动、但每个请求都死」——
+> 只测函数的测试看不出这种故障。
 
 > Windows 上 `python` 可能是 `py -3` 或 `python3`。找不到 `python` 就试另外两个。
 > 代理需要 **Python 3.9+，且只需要这个** —— 没有 `pip install`，没有虚拟环境，没有依赖。
@@ -136,6 +145,24 @@ API key：代理**透传 agent 发过来的 key**。用户继续在原本的 age
 **没做这一步检查就不要声称成功。** 代理自己的 `--self-test` 只证明注入逻辑对；
 只有真实往返才能证明模型行为变了。
 
+### 如果客户端报「连接被关闭」/`RemoteDisconnected`
+
+对**正在跑的**代理跑一遍附带的冒烟脚本：
+
+```bash
+python tests/proxy_smoke.py --port 8790
+```
+
+它把三种在客户端看来一模一样的故障区分开：
+
+| 冒烟脚本的输出 | 含义 |
+|---|---|
+| `/health` 连不上 | 代理没在跑 / 端口不对 |
+| `/health` 正常，然后 `RemoteDisconnected` | **代理处理请求时崩了** —— 跑 `python proxy/proxy.py --self-test`，端到端检查项会指出原因 |
+| 401 | key 没到位 —— agent 必须自己带 key |
+
+拿到 401 本身就说明请求路径是活的。
+
 ---
 
 ## 改用 Hermes 插件
@@ -143,12 +170,12 @@ API key：代理**透传 agent 发过来的 key**。用户继续在原本的 age
 只有当用户跑 Hermes Agent 且明确要走原生插件路径时：
 
 ```bash
-cp -r plugin/minimax-jailbreak-core ~/.hermes/plugins/
+cp -r plugin ~/.hermes/plugins/minimax-jailbreak-core
 hermes plugins enable minimax-jailbreak-core
 cd ~/.hermes/plugins/minimax-jailbreak-core && python selftest.py
 ```
 
-预期：`结果: 99 通过, 0 失败`（离线，不需要 key）。
+预期：`结果: 17 通过, 0 失败`（离线，不需要 key）。
 
 插件额外提供会话级控制：
 

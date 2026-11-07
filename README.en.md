@@ -112,12 +112,12 @@ Factory Droid, WorkBuddy, …) is in
 ### The Hermes plugin
 
 ```bash
-cp -r plugin/minimax-jailbreak-core ~/.hermes/plugins/
+cp -r plugin ~/.hermes/plugins/minimax-jailbreak-core
 hermes plugins enable minimax-jailbreak-core
 cd ~/.hermes/plugins/minimax-jailbreak-core && python selftest.py
 ```
 
-Expected: a summary line reporting **99 passed, 0 failed** (the tool prints
+Expected: a summary line reporting **17 passed, 0 failed** (the tool prints
 its summary in Chinese) — fully offline, no API key needed.
 
 <!-- The self-test prints its summary in Chinese; that is the tool's own output, not documentation prose. -->
@@ -299,7 +299,7 @@ plugin/                    Hermes-native plugin
   __init__.py              middleware: system rebuild, effort injection,
                            auth block, per-session bootstrap fallback
   plugin.yaml              plugin manifest
-  selftest.py              offline self-test (99 checks)
+  selftest.py              offline self-test (17 checks)
   title_extract.py         title classifier used by the probe tooling
   prompts/profiles/        the kernel text, in two segments
 skill/llm-refusal-bypass/  reusable measurement methodology + probe script
@@ -370,7 +370,7 @@ Defaults: profile `strict`, effort `medium`, adaptive thinking on.
 ```bash
 # offline, no API key, no network
 cd proxy && python proxy.py --self-test
-cd plugin/minimax-jailbreak-core && python selftest.py
+cd plugin && python selftest.py
 ```
 
 Then run the live probe against your own endpoint (needs your key):

@@ -26,10 +26,10 @@ cd minimax-jailbreak-kernel
 
 ```bash
 # Linux / macOS
-cp -r plugin/minimax-jailbreak-core ~/.hermes/plugins/
+cp -r plugin ~/.hermes/plugins/minimax-jailbreak-core
 
 # Windows PowerShell
-Copy-Item -Recurse .\plugin\minimax-jailbreak-core "$env:USERPROFILE\.hermes\plugins\"
+Copy-Item -Recurse .\plugin "$env:USERPROFILE\.hermes\plugins\minimax-jailbreak-core"
 ```
 
 最终目录结构必须是 `.../plugins/minimax-jailbreak-core/__init__.py`，
@@ -74,7 +74,7 @@ cd ~/.hermes/plugins/minimax-jailbreak-core
 python selftest.py
 ```
 
-预期输出类似：`结果: 99 通过, 0 失败`。
+预期输出类似：`结果: 17 通过, 0 失败`。
 
 这个测试**完全离线** —— 它用合成的请求载荷驱动中间件，从不联系模型。
 

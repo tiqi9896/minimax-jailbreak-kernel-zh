@@ -22,7 +22,7 @@ Two carriers:
 | Carrier | Use when |
 |---|---|
 | **`proxy/proxy.py`** | **Default.** Works with any agent that can set a `base_url`. No agent-side plugin needed. |
-| `plugin/minimax-jailbreak-core/` | The user runs Hermes Agent and wants the native path (session-level on/off). |
+| `plugin/` | The user runs Hermes Agent and wants the native path (session-level on/off). |
 
 **The proxy is the right answer in almost every case.** Use it unless the
 user explicitly says they run Hermes Agent and want the plugin.
@@ -42,14 +42,23 @@ cd minimax-jailbreak-kernel
 python proxy/proxy.py --self-test
 ```
 
-Expected output ends with:
+Expected output ends with this exact line:
 
 ```
-ALL PASSED
+ALL PASSED / 结果: 全部通过
 ```
 
-If that line is missing, report the failure verbatim and stop — do not
-attempt to "fix" the kernel text.
+It is written in **both languages on purpose** — an agent reading the
+English docs and an agent reading the Chinese docs both get the same
+marker. If the line is missing (or says `SELF-TEST FAILED / 自检失败`),
+report the failure verbatim and stop — do not attempt to "fix" the kernel
+text.
+
+> The self-test now includes a **real end-to-end HTTP round trip** against
+> a local stub upstream: it starts the proxy, sends actual requests over
+> all three protocol shapes, and asserts a response comes back. This is
+> what catches "the proxy starts fine but every request dies" — a failure
+> mode a function-level test cannot see.
 
 > On Windows, `python` may be `py -3` or `python3`. If `python` is not found,
 > try the others. The proxy needs **Python 3.9+ and nothing else** — no
@@ -143,6 +152,24 @@ If `kernel=n`, the request bypassed the proxy — the base URL is wrong.
 proves the injection logic; only a real round trip proves the model behaves
 differently.
 
+### If the client reports "connection closed" / `RemoteDisconnected`
+
+Run the bundled smoke test against the **running** proxy:
+
+```bash
+python tests/proxy_smoke.py --port 8790
+```
+
+It separates three failure modes that look identical from the client:
+
+| What the smoke test says | What it means |
+|---|---|
+| `/health` unreachable | the proxy is not running / wrong port |
+| `/health` OK, then `RemoteDisconnected` | **the proxy crashed while handling the request** — run `python proxy/proxy.py --self-test`; the end-to-end checks name the cause |
+| 401 | the key is not reaching the proxy — the agent must send its own key |
+
+Getting a 401 still proves the request path is alive.
+
 ---
 
 ## Using the Hermes plugin instead
@@ -150,12 +177,12 @@ differently.
 Only if the user runs Hermes Agent and asks for the native plugin path:
 
 ```bash
-cp -r plugin/minimax-jailbreak-core ~/.hermes/plugins/
+cp -r plugin ~/.hermes/plugins/minimax-jailbreak-core
 hermes plugins enable minimax-jailbreak-core
 cd ~/.hermes/plugins/minimax-jailbreak-core && python selftest.py
 ```
 
-Expected: a summary line reporting **99 passed, 0 failed** (the tool prints
+Expected: a summary line reporting **17 passed, 0 failed** (the tool prints
 its summary in Chinese) — offline, no key needed.
 
 The plugin adds session-level control:
@@ -176,7 +203,7 @@ effort low|medium|high|max
 proxy/proxy.py              the proxy — stdlib only, no dependencies
 proxy/kernel/               the kernel text (two segments)
 proxy/docs/AGENT-SETUP.md   per-agent configuration for 20+ agents
-plugin/minimax-jailbreak-core/   Hermes-native plugin
+plugin/                        Hermes-native plugin
 skill/llm-refusal-bypass/   measurement methodology + probe script
 docs/                       install / usage notes
 ```
@@ -209,6 +236,7 @@ docs/                       install / usage notes
 | 401 invalid API key | the agent's own key is not reaching MiniMax | Check the agent's key setting; the proxy does not store keys |
 | connection refused | the proxy is not running | start it; check `--port` matches the base URL |
 | nothing changes | the agent is not going through the proxy | look for `kernel=n` in the proxy log |
+| client sees "connection closed" / `RemoteDisconnected` | the proxy crashed on the request | run `python proxy/proxy.py --self-test` — it now runs a real end-to-end request; the failing check names the cause |
 | Cursor/Codex cannot connect | they require a public HTTPS endpoint | set up a tunnel |
 | answer is cut in half | output cap too low | raise `--min-output-tokens` |
 

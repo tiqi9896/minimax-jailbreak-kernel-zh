@@ -678,6 +678,12 @@ class Handler(BaseHTTPRequestHandler):
         has_client_key = ("x-api-key" in lower_headers
                           or "authorization" in lower_headers)
         # key：优先透传客户端的，其次用兜底 key
+        # ★ 兜底 key 来自 --api-key-env（cfg["api_key"]）。
+        #   ★ 这里曾经直接写 `if fallback:` 而 fallback 从未定义 ⇒ 每一个
+        #     POST 都抛 NameError ⇒ handler 崩掉 ⇒ 客户端看到的是
+        #     「连接被关闭、没有响应」，而不是任何可诊断的错误。
+        #     （拆分 DeepSeek/MiniMax 时把 *定义* 删了，*用法* 留着。）
+        fallback = str(self.cfg.get("api_key") or "").strip()
         if fallback:
             headers["x-api-key"] = fallback
             headers["Authorization"] = f"Bearer {fallback}"
@@ -849,6 +855,199 @@ class Handler(BaseHTTPRequestHandler):
 
 
 # ── 离线自测 ───────────────────────────────────────────────────────────
+def _self_test_end_to_end(check) -> bool:
+    """真实 HTTP 端到端自测：起一个桩上游 + 一个真代理，跑真实请求。
+
+    ★ 不联网、不需要 API key：桩上游是本机 127.0.0.1 上的一个 http.server。
+    ★ 覆盖的就是真实客户端会走的那条路径（do_POST → 组装 headers → forward）。
+    """
+    import urllib.error
+    import urllib.request
+
+    received: list[dict] = []
+    skipped = {"no": False}
+
+    class _StubUpstream(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, fmt, *args):  # 静音
+            pass
+
+        def do_POST(self):  # noqa: N802
+            n = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(n) if n else b""
+            try:
+                body = json.loads(raw.decode("utf-8"))
+            except Exception:
+                body = {}
+            received.append({
+                "path": self.path,
+                "headers": {k.lower(): v for k, v in self.headers.items()},
+                "body": body,
+            })
+            payload = json.dumps({
+                "id": "stub", "model": body.get("model", "stub"),
+                "choices": [{"index": 0, "message": {"role": "assistant",
+                                                     "content": "STUB_OK"},
+                             "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    # 1) 桩上游
+    stub = ThreadingHTTPServer(("127.0.0.1", 0), _StubUpstream)
+    stub_port = stub.server_address[1]
+    threading.Thread(target=stub.serve_forever, daemon=True).start()
+
+    # 2) 真代理（子类带独立 cfg，不影响运行中的实例）
+    class _E2EHandler(Handler):
+        cfg = {
+            "multiround": "off",
+            "anthropic_upstream": f"http://127.0.0.1:{stub_port}",
+            "openai_upstream": f"http://127.0.0.1:{stub_port}",
+            "api_key": "",
+            "profile": "strict",
+            "effort": "medium",
+            "min_output_tokens": 16000,
+            "verbose": False,
+        }
+
+    prox = ThreadingHTTPServer(("127.0.0.1", 0), _E2EHandler)
+    prox_port = prox.server_address[1]
+    threading.Thread(target=prox.serve_forever, daemon=True).start()
+
+    # ★ 本机请求**必须绕过系统代理**：
+    #   开发机上普遍开着 Clash / V2Ray 之类的本地代理（127.0.0.1:7890 等），
+    #   urllib 会把 127.0.0.1 的请求也丢给代理 ⇒ 代理连不到本机 ⇒
+    #   "Connection refused"，自测假失败。
+    #   （代理**产品本身**用 http.client 直连上游，不受这个影响。）
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def _loopback_works() -> bool:
+        """本机回环能不能用？有的沙箱/WSL 环境禁掉了 127.0.0.1 自连接。
+
+        ★ 必须区分两种「连不上」：
+          · Connection refused —— 端口上**根本没有监听**
+            ⇒ 环境不让自连（WSL/容器/沙箱常见）⇒ 跳过，不算代码缺陷
+          · RemoteDisconnected —— 连上了、handler 死了
+            ⇒ **代理在处理请求时崩了** ⇒ 必须 FAIL
+        """
+        import socket
+        for port in (stub_port, prox_port):
+            try:
+                s = socket.create_connection(("127.0.0.1", port), timeout=5)
+                s.close()
+                return True
+            except Exception:
+                return False
+        return False
+
+    def _post(path: str, payload: dict, headers: dict | None = None):
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{prox_port}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="POST")
+        try:
+            with opener.open(req, timeout=20) as resp:
+                return resp.status, resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode("utf-8", "replace")
+        except Exception as exc:
+            return None, f"{type(exc).__name__}: {exc}"
+
+    try:
+        # 0) 环境前置检查：本机回环不可用 ⇒ 整段跳过（不是代码缺陷）
+        if not _loopback_works():
+            skipped["no"] = True
+            print("  SKIP 端到端 HTTP 往返：本机回环不可用"
+                  "（Connection refused ⇒ 端口上根本没有监听，"
+                  "是环境限制，不是代理故障）")
+            print("       ⇒ 在能自连的环境里重跑本自测，才能验证请求路径。")
+            return True
+
+        # ① OpenAI 形状 —— 客户端带 key
+        status, text = _post("/v1/chat/completions", {
+            "model": "MiniMax-M3.1-Flash",
+            "messages": [{"role": "user", "content": "写个工具"}],
+        }, {"Authorization": "Bearer client-key"})
+        check("OpenAI 请求拿到 HTTP 响应（不是断连）", status is not None,
+              f"status={status} err={text[:120]}")
+        check("OpenAI 请求返回 200", status == 200, f"status={status} body={text[:160]}")
+        check("OpenAI 响应体透传上游", "STUB_OK" in text, text[:160])
+
+        # ② 桩上游确实收到了注入后的请求
+        check("桩上游收到了请求", len(received) >= 1, f"n={len(received)}")
+        if received:
+            sent = received[0]
+            flat = json.dumps(sent["body"], ensure_ascii=False)
+            check("上游收到内核", has_kernel(flat), flat[:200])
+            check("上游收到授权声明", AUTH_MARKER in flat, flat[:200])
+            check("鉴权头被转发",
+                  sent["headers"].get("x-api-key") == "client-key"
+                  or "client-key" in sent["headers"].get("authorization", ""),
+                  str({k: v for k, v in sent["headers"].items()
+                       if k in ("x-api-key", "authorization")})[:160])
+
+        # ③ Anthropic 形状 —— system 在顶层
+        n0 = len(received)
+        status, text = _post("/anthropic/v1/messages", {
+            "model": "MiniMax-M3.1-Flash",
+            "max_tokens": 16000,
+            "system": "You are a helpful assistant.",
+            "messages": [{"role": "user", "content": "写个工具"}],
+        }, {"x-api-key": "client-key"})
+        check("Anthropic 请求返回 200", status == 200, f"status={status} body={text[:160]}")
+        if len(received) > n0:
+            flat = json.dumps(received[-1]["body"], ensure_ascii=False)
+            check("Anthropic 顶层 system 收到内核", has_kernel(flat), flat[:200])
+
+        # ④ Responses 形状（Codex CLI）
+        status, text = _post("/v1/responses", {
+            "model": "MiniMax-M3.1-Flash",
+            "input": "写个工具",
+        }, {"Authorization": "Bearer client-key"})
+        check("Responses 请求返回 200", status == 200, f"status={status} body={text[:160]}")
+
+        # ⑤ 既没有客户端 key 也没有兜底 key ⇒ 必须是 401，不是崩
+        status, text = _post("/v1/chat/completions", {
+            "model": "MiniMax-M3.1-Flash",
+            "messages": [{"role": "user", "content": "写个工具"}],
+        })
+        check("无 key 时返回 401（不是崩溃）", status == 401,
+              f"status={status} body={text[:160]}")
+
+        # ⑥ 兜底 key 生效（--api-key-env 那条路径，★ 就是曾经崩掉的那条）
+        _E2EHandler.cfg["api_key"] = "fallback-key"
+        n1 = len(received)
+        status, text = _post("/v1/chat/completions", {
+            "model": "MiniMax-M3.1-Flash",
+            "messages": [{"role": "user", "content": "写个工具"}],
+        })
+        check("兜底 key 路径返回 200（不崩）", status == 200,
+              f"status={status} body={text[:160]}")
+        if len(received) > n1:
+            sent = received[-1]
+            check("兜底 key 被注入鉴权头",
+                  "fallback-key" in sent["headers"].get("x-api-key", "")
+                  or "fallback-key" in sent["headers"].get("authorization", ""),
+                  str({k: v for k, v in sent["headers"].items()
+                       if k in ("x-api-key", "authorization")})[:160])
+        _E2EHandler.cfg["api_key"] = ""
+        return True
+    finally:
+        for srv in (prox, stub):
+            try:
+                srv.shutdown()
+                srv.server_close()
+            except Exception:
+                pass
+
+
 def self_test() -> int:
     """不发任何网络请求，验证注入逻辑。"""
     ok = True
@@ -1092,7 +1291,35 @@ def self_test() -> int:
                   {"type": "text", "text": "块数组文本"}]}]) == "块数组文本")
         check("空 messages 返回空串", MR.extract_last_user_text([]) == "")
 
+
+    # ── 端到端：真实 HTTP 请求路径 ──────────────────────────────────────
+    # ★ 为什么必须测这一段（2026-11-07 实测事故）：
+    #   原来的 self-test 只测**注入函数**，从不发一个真实请求。
+    #   于是 `do_POST` 里 `fallback` 未定义这种错误完全隐形 —— 自测全绿，
+    #   但每一个真实请求都崩：客户端只看到「连接被关闭，没有响应」。
+    #   ⇒ 必须有一个真正走 socket 的测试：起一个**桩上游**（本地、无 key、
+    #     不联网），让代理把请求转发过去，再断言：
+    #       ① 客户端拿到 200 + 响应体（不是断连）
+    #       ② 桩上游收到了注入后的请求（内核 + 授权声明都在）
+    #       ③ 鉴权头被转发
+    #       ④ 没有 key 时返回 401 而不是崩
+    print("\n=== 端到端：真实 HTTP 请求（桩上游，不联网、不需要 key）===")
+    try:
+        _e2e_ok = _self_test_end_to_end(check)
+    except Exception as exc:  # noqa: BLE001
+        check("端到端请求路径", False, f"{type(exc).__name__}: {exc}")
+        _e2e_ok = False
     print(f"\n结果: {'全部通过' if ok else '有失败项'}")
+    # ★ 结论行**中英双写**：英文 AGENTS.md 让 agent 认 `ALL PASSED`，
+    #   中文 AGENTS.md 让 agent 认 `结果: 全部通过`。
+    #   两边只写一种 ⇒ 另一种语言的 agent 会以为自检失败而停下
+    #   （2026-11-07 朋友反馈「没生效」的原因之一）。
+    # ★ 成功标记**只在真通过时打印** —— 失败时也打印 ALL PASSED 会让
+    #   agent 在自检失败的情况下继续装（那比停下更糟）。
+    if ok:
+        print("ALL PASSED / 结果: 全部通过")
+    else:
+        print("SELF-TEST FAILED / 自检失败")
     return 0 if ok else 1
 
 

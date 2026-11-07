@@ -190,7 +190,7 @@ The proxy passes your key through; you never hand it to the proxy.
 Hermes users can install the native plugin instead:
 
 ```bash
-cp -r plugin/minimax-jailbreak-core ~/.hermes/plugins/
+cp -r plugin ~/.hermes/plugins/minimax-jailbreak-core
 hermes plugins enable minimax-jailbreak-core
 ```
 
@@ -200,7 +200,7 @@ hermes plugins enable minimax-jailbreak-core
 
 ```bash
 cd proxy && python proxy.py --self-test
-cd plugin/minimax-jailbreak-core && python selftest.py
+cd plugin && python selftest.py
 ```
 
 Then run the live probe against your own endpoint and compare the layer on vs off:

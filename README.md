@@ -106,12 +106,12 @@ python proxy.py --verbose        # 监听 127.0.0.1:8790
 ### Hermes 插件
 
 ```bash
-cp -r plugin/minimax-jailbreak-core ~/.hermes/plugins/
+cp -r plugin ~/.hermes/plugins/minimax-jailbreak-core
 hermes plugins enable minimax-jailbreak-core
 cd ~/.hermes/plugins/minimax-jailbreak-core && python selftest.py
 ```
 
-预期输出：`结果: 99 通过, 0 失败` —— 完全离线，不需要 API key。
+预期输出：`结果: 17 通过, 0 失败` —— 完全离线，不需要 API key。
 
 ---
 
@@ -264,7 +264,7 @@ plugin/                    Hermes 原生插件
   __init__.py              中间件：system 重建、effort 注入、
                            授权声明块、按会话兜底
   plugin.yaml              插件清单
-  selftest.py              离线自测（99 项）
+  selftest.py              离线自测（17 项）
   title_extract.py         探针工具用的标题分类器
   prompts/profiles/        内核文案，分两段
 skill/llm-refusal-bypass/  可复用的测量方法论 + 探针脚本
@@ -336,7 +336,7 @@ effort low|medium|high|max
 ```bash
 # 离线，不需要 API key，不联网
 cd proxy && python proxy.py --self-test
-cd plugin/minimax-jailbreak-core && python selftest.py
+cd plugin && python selftest.py
 ```
 
 然后对着你自己的端点跑活体探针（需要你的 key）：

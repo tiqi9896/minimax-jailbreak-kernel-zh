@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     一键安装并验证破甲代理（Windows PowerShell 5.1 / PowerShell 7 均可）
 

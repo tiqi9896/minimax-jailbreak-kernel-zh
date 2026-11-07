@@ -48,11 +48,11 @@ def _detect_upstream_profiles() -> Path | None:
 
 ```bash
 # 把插件复制到一个没有上游兄弟目录的地方，然后跑测试：
-cp -r plugin/minimax-jailbreak-core /tmp/standalone/
-cd /tmp/standalone && python selftest.py
+cp -r plugin /tmp/standalone/minimax-jailbreak-core
+cd /tmp/standalone/minimax-jailbreak-core && python selftest.py
 ```
 
-预期：`结果: 99 通过, 0 失败`。
+预期：`结果: 17 通过, 0 失败`。
 
 如果它只在你机器上通过、在干净目录里失败，那你就是中了 `None` 那个 bug。
 
@@ -97,7 +97,7 @@ cd proxy && python proxy.py --self-test
 
 ```bash
 # 离线，不需要 API key，不联网
-cd plugin/minimax-jailbreak-core && python selftest.py
+cd plugin && python selftest.py
 ```
 
 自测用合成请求载荷驱动中间件：system prompt 重建、effort 注入、授权声明块、

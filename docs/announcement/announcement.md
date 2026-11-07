@@ -173,7 +173,7 @@ python proxy/proxy.py --verbose        # 监听 127.0.0.1:8790
 Hermes 用户也可以装原生插件：
 
 ```bash
-cp -r plugin/minimax-jailbreak-core ~/.hermes/plugins/
+cp -r plugin ~/.hermes/plugins/minimax-jailbreak-core
 hermes plugins enable minimax-jailbreak-core
 ```
 
@@ -183,7 +183,7 @@ hermes plugins enable minimax-jailbreak-core
 
 ```bash
 cd proxy && python proxy.py --self-test
-cd plugin/minimax-jailbreak-core && python selftest.py
+cd plugin && python selftest.py
 ```
 
 再对着你自己的端点跑活体探针，开着这层和关掉这层各跑一次：
