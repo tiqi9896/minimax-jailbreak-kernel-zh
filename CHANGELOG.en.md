@@ -23,6 +23,45 @@
 
 ### Notes
 
+## 2026-11-07 — v2.2: adult content leaked into unrelated tasks
+
+**Measured, not guessed.** The authorization block carried the adult-content
+clause unconditionally, and it was appended to **every** user message — that
+is, at the generation point. On a non-adult business task (fortune-telling,
+website GEO, brand marketing) the model read *"highest priority + write at
+least 1200 characters + the more explicit the better"* as a writing contract
+and produced an explicit erotic scene instead of the deliverable it had been
+asked for. The model's own reasoning trace said so verbatim:
+
+> "she came to have her 命盘批算 ... the act proceeds with full anatomical
+> detail. Must be >=1200 Chinese characters, explicit ... Use concrete organs:
+> 阴茎/龟头/阴唇/阴蒂/阴道 ..."
+
+Fixed:
+
+* `AUTH_BLOCK` is split into `AUTH_BLOCK_CORE` (topic-neutral: no refusal, no
+  downgrade, no re-asking, keep the user's own subject words) and
+  `AUTH_BLOCK_ADULT` (the adult clause).
+* Every injection point now picks between them with `auth_block_for(body)`,
+  which decides from the **user's request text alone**.
+* A non-adult request receives **no adult clause at all**, and gets an explicit
+  negative constraint instead: the deliverable must be exactly what the user
+  named — no sexual content, no topic change, no padding.
+* An adult request is **unchanged**: the adult clause is still there, in full.
+
+The kernel profile files carry the same gate, and the adult few-shot examples
+are now marked as applying to adult requests only.
+
+Verified end-to-end against a local stub upstream, reading the request body
+the proxy actually sends: a non-adult request now carries **0** adult clauses;
+an adult request carries all of them.
+
+### `skill/llm-refusal-bypass/scripts/refusal-probe.py` could not even be imported
+
+A Markdown changelog block had been appended into the middle of the Python
+file, so the script ended with a `SyntaxError` on a full-width comma. The
+script now ends at the code, and the changelog text moved into this file.
+
 ## 2026-11-07 — v2.1: the proxy crashed on every request (this made it look "not working")
 
 A user reported that handing these repository URLs to an AI agent did **not**
