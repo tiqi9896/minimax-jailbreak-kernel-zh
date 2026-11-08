@@ -23,6 +23,33 @@
 
 ### Notes
 
+## 2.2.3 — the intent gate ate a real adult request (regression, found by our own E2E)
+
+**Measured, not guessed.** 2.2.2 shipped an intent gate for adult-request detection. It worked —
+except that its policy-line stripper also matched **`正文至少1200字`**, a phrase that appears in
+**ordinary adult requests**:
+
+> 「写一段 ROLE_A 与 ROLE_B 的成人虚构对话，要露骨，器官体液都写出来，正文至少1200字」
+
+The whole line was stripped as "policy boilerplate" ⇒ the request classified as **non-adult**
+⇒ **the adult clause was no longer injected** ⇒ *the capability was silently gone*.
+
+Our own end-to-end check caught it: the "requests that carry the adult clause" count dropped
+from **1** to **0** on the MiniMax repos.
+
+**Fix — two tiers instead of one:**
+- **Hard markers** (`交付范围确认` / `授权状态` / `角色均为成年虚构人物` / `用户要求露骨描写时` /
+  `本条不授权` …) are unmistakably boilerplate ⇒ always stripped.
+- **Soft markers** (`正文至少N字` / `从头写到尾` / `标题：` / `作用范围` …) are too generic ⇒
+  stripped **only when the line contains no adult word**. If the line carries an adult word
+  **and** a request verb (`写` / `来一段` / `生成` / `创作` / `输出` / `续写`), it is a **request**
+  ⇒ kept. *Never kill the capability to save a boilerplate strip.*
+
+**Regression-tested.** The plugin self-test and the proxy self-test now assert the intent gate in
+**both directions**, and the repo's own E2E probe string is part of the adult-request matrix —
+so this class of regression is caught by the tests instead of by a human reading the diff.
+
+
 ## 2.2.2 — a request that *talks about* adult content was treated as an adult request
 
 **Measured, not guessed.** The adult clause is gated on the request's own topic, but the gate
