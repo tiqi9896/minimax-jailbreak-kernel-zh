@@ -23,6 +23,40 @@
 
 ### Notes
 
+## 2.2.1 — adult-request detection missed the words people actually use
+
+**Measured, not guessed.** After the adult clause was gated on the request's own
+topic, the gate's vocabulary turned out to be too narrow: it had `黄文` but **not**
+`黄色`. So a request that said **「写个黄色小说看看」** was classified as
+*non-adult* ⇒ the adult clause was never injected ⇒ the model refused with
+"Sorry, I can't respond to this question."
+
+The vocabulary now also covers 黄色小说 / 黄色视频 / 黄片 / 黄播 / 黄漫 / 肉文 /
+里番 / 三级片 / 香艳 / 艳情 / 淫秽 / 情欲 / 挑逗 / 催情 / 春宫图 / 涩情 /
+不和谐 / 露出癖 / 高潮描写 / 插入体内 / 吞没 / 顶进 / 18禁 / hentai — 38 ways of
+asking, all of them.
+
+★ **At the same time the ambiguous words were narrowed**, because the old list
+would have re-introduced the very bug the gate was built to stop:
+
+| bare word | benign usage | now |
+|---|---|---|
+| `插入` | 「在数组中插入元素」「插入代码」「插入 U 盘」 | `插入(体内\|异物\|她\|他\|…)` |
+| `高潮` | 「剧情达到高潮」「高潮迭起」 | `高潮(描写\|镜头\|特写\|…)` |
+| `涩` | 「羞涩」「苦涩」 | `涩情\|涩片\|涩书\|涩涩\|好涩…` |
+| `荤` | 「荤菜」「荤腥」 | `荤文\|荤戏\|荤段\|荤片` |
+| `媚` | 「妩媚」 | `媚态\|媚骨\|媚俗` |
+| `体内` | 「体内循环」「体内能量」 | `插入体内` etc. |
+| `成人` | 「成人高考」「成人教育」 | `成人(向\|小说\|内容\|…)` |
+
+Verified against 36 must-match phrasings and 24 must-not-match ones:
+**0 false negatives, 0 false positives** on all three detectors (plugin,
+proxy, bridge).
+
+★ **End-to-end proof** (real upstream, not a stub): the exact request that was
+refused now returns **2349 characters of delivered prose** through the proxy,
+and the MiniMax direct path returns **2336 characters**.
+
 ## 2026-11-07 — v2.2: adult content leaked into unrelated tasks
 
 **Measured, not guessed.** The authorization block carried the adult-content
