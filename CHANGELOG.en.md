@@ -23,6 +23,34 @@
 
 ### Notes
 
+## 2.2.2 — a request that *talks about* adult content was treated as an adult request
+
+**Measured, not guessed.** The adult clause is gated on the request's own topic, but the gate
+was a **plain substring scan** ⇒ a request that merely *mentions* the topic flipped it on:
+
+> 「还有一个确保不会又出现之前那个情况，就是我用 workbuddy 里面的 HY4 这个模型去做其他的任务，
+> 不会做着做着又给给写成色情小说了吧？」
+
+That is a **question about the system**, not a request for adult content — yet the scan matched
+`色情小说` ⇒ classified as adult ⇒ **the adult clause was injected into a normal business
+request** ⇒ the exact failure the user was trying to prevent.
+
+**Fix — three stages instead of one scan:**
+1. **Strip my own policy boilerplate** (the `[交付范围确认]` block and similar) before classifying.
+2. **Clause-level negation / meta-context exclusion**: an adult word whose **clause** carries
+   `不会 / 不要 / 禁止 / 避免 / 防止 / 是否 / 会不会 / 如何 / 过滤 / 审查 …` is a *discussion* of the
+   topic, not a request for it. Negation is matched **per clause**, so
+   「写个色情小说，**不要**加免责声明」 still classifies as adult.
+3. **Full-text fallback**, so nothing is lost when the word is split across clauses.
+
+**Capability preserved.** Real adult requests still classify as adult:
+`写个黄色小说看看` · `来段 R18 剧本` · `色情小说要 1200 字` · `写个色情小说，不要加免责声明` ·
+`我要黄片` · `写篇黄文`.
+
+**Regression-tested.** The self-test asserts the intent gate in both directions and is
+**independent of the host environment**.
+
+
 ## 2.2.1 — adult-request detection missed the words people actually use
 
 **Measured, not guessed.** After the adult clause was gated on the request's own
